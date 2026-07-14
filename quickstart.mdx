@@ -1,0 +1,213 @@
+---
+title: Quickstart
+description: From zero to your first published post in about 30 minutes
+icon: "rocket"
+---
+
+<Steps>
+  <Step title="Generate your connection key">
+    In Castro, open **Settings → Integration → Custom Website** and click
+    **Get Connection Key**.
+
+    This key authenticates every request Castro sends you. Keep it server-side —
+    anyone holding it can publish to your site.
+  </Step>
+
+  <Step title="Verify signatures before anything else">
+    Every request carries three headers, and the signature covers the **raw
+    request bytes**. Do this in middleware, before your JSON parser runs.
+
+    <CodeGroup>
+    ```js Node / Express
+    const crypto = require("crypto");
+
+    // Capture the raw body BEFORE the JSON parser touches it.
+    app.use(express.json({ verify: (req, res, buf) => (req.rawBody = buf) }));
+
+    app.use("/api/castro", (req, res, next) => {
+      const ts = req.headers["x-castro-timestamp"] || "";
+      const given = String(req.headers["x-castro-signature"] || "");
+
+      if (req.headers["x-api-key"] !== API_KEY)
+        return res.status(401).json({ error: "Invalid API key" });
+
+      // Castro signs with Date.now() — milliseconds.
+      if (Math.abs(Date.now() - Number(ts)) > 5 * 60 * 1000)
+        return res.status(401).json({ error: "Stale request" });
+
+      const expected = crypto
+        .createHmac("sha256", API_KEY)
+        .update(Buffer.concat([Buffer.from(`${ts}.`), req.rawBody || Buffer.alloc(0)]))
+        .digest("hex");
+
+      const ok =
+        given.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+
+      if (!ok) return res.status(401).json({ error: "Invalid signature" });
+      next();
+    });
+    ```
+
+    ```php PHP
+    $key = getenv('CASTRO_API_KEY');
+    $ts  = $_SERVER['HTTP_X_CASTRO_TIMESTAMP'] ?? '';
+    $raw = file_get_contents('php://input');   // RAW bytes, never re-encoded
+
+    if (! hash_equals($key, $_SERVER['HTTP_X_API_KEY'] ?? '')) {
+        http_response_code(401);
+        exit(json_encode(['error' => 'Invalid API key']));
+    }
+
+    // microtime(true) * 1000 — Castro signs in milliseconds, not seconds.
+    if (abs(round(microtime(true) * 1000) - (int) $ts) > 300000) {
+        http_response_code(401);
+        exit(json_encode(['error' => 'Stale request']));
+    }
+
+    $expected = hash_hmac('sha256', $ts . '.' . $raw, $key);
+
+    if (! hash_equals($expected, $_SERVER['HTTP_X_CASTRO_SIGNATURE'] ?? '')) {
+        http_response_code(401);
+        exit(json_encode(['error' => 'Invalid signature']));
+    }
+    ```
+
+    ```python Python / Flask
+    import hashlib, hmac, time
+
+    raw = request.get_data()            # bytes — not request.json
+    ts  = request.headers.get("X-Castro-Timestamp", "")
+
+    if not hmac.compare_digest(request.headers.get("X-API-Key", ""), API_KEY):
+        return {"error": "Invalid API key"}, 401
+
+    # time.time() is seconds — Castro signs in milliseconds.
+    if abs(time.time() * 1000 - float(ts or 0)) > 300_000:
+        return {"error": "Stale request"}, 401
+
+    expected = hmac.new(
+        API_KEY.encode(), f"{ts}.".encode() + raw, hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, request.headers.get("X-Castro-Signature", "")):
+        return {"error": "Invalid signature"}, 401
+    ```
+    </CodeGroup>
+
+    Full details in [authentication](/authentication).
+  </Step>
+
+  <Step title="Implement the three required endpoints">
+    Mount them under one base path, e.g. `/api/castro`.
+
+    **`POST /handshake`** — prove you hold the key, and declare what you support.
+    Sign the challenge with **your own stored key**, never with the key that
+    arrived in the request:
+
+    ```js
+    app.post("/api/castro/handshake", (req, res) => {
+      res.json({
+        name: "My Site",
+        version: "1.0",
+        capabilities: ["posts.create", "posts.update", "posts.delete"],
+        challenge_response: crypto
+          .createHmac("sha256", API_KEY)
+          .update(String(req.body.challenge))
+          .digest("hex"),
+      });
+    });
+    ```
+
+    **`POST /posts`** — store the post, return your id. Castro uses that id in
+    every later call about this post, so make it stable:
+
+    ```js
+    app.post("/api/castro/posts", async (req, res) => {
+      const { title, content, excerpt, status, categories, seo, source_id } = req.body;
+
+      // Re-publishes carry the same source_id — update instead of duplicating.
+      const existing = await db.posts.findBySourceId(source_id);
+      const post = existing
+        ? await db.posts.update(existing.id, { title, html: content, excerpt, status })
+        : await db.posts.create({ title, html: content, excerpt, status, categories, seo, source_id });
+
+      res.status(201).json({ id: String(post.id), url: post.publicUrl });
+    });
+    ```
+
+    **`PUT /posts/{id}`** — a **partial** update. Apply only the fields present;
+    leave everything else alone:
+
+    ```js
+    app.put("/api/castro/posts/:id", async (req, res) => {
+      const post = await db.posts.find(req.params.id);
+      if (!post) return res.status(404).json({ error: "Post not found" });
+
+      // "Update Content" sends only { content, source_id }. A full replace here
+      // would erase the title, categories, author and SEO.
+      for (const [key, value] of Object.entries(req.body)) {
+        if (value !== undefined) post[key] = value;
+      }
+      await post.save();
+
+      res.json({ id: String(post.id), url: post.publicUrl });
+    });
+    ```
+
+    Working servers in [Node](/examples/node), [Laravel](/examples/laravel),
+    [PHP](/examples/php) and [Python](/examples/python).
+  </Step>
+
+  <Step title="Prove it works">
+    Before you connect anything, run the conformance script against your
+    endpoints. It catches the bugs that otherwise surface weeks later, in
+    production, as a user's missing title:
+
+    ```bash
+    node castro-conformance.mjs https://your-site.com/api/castro <your-key>
+    ```
+
+    Grab it from [Test your implementation](/testing) — one file, no dependencies.
+  </Step>
+
+  <Step title="Connect your website">
+    Back in Castro, enter your **base URL** — `https://your-site.com/api/castro`,
+    not the handshake path — and click **Connect website**.
+
+    Castro calls your `/handshake`, verifies the challenge, and stores your
+    declared capabilities.
+
+    <Warning>
+    Your base URL must be reachable from the public internet. `localhost` won't
+    work — deploy it, or tunnel it with `ngrok http 3000` while developing.
+    </Warning>
+  </Step>
+
+  <Step title="Publish something">
+    Create a blog post in Castro and hit **Publish**. Your `POST /posts` receives
+    the payload, and the id you return is used for every later update.
+
+    Every request and your exact response are visible in
+    **Settings → Integration → Custom Website → Logs**.
+  </Step>
+</Steps>
+
+## What next
+
+<CardGroup cols={2}>
+  <Card title="Launch checklist" icon="list-check" href="/checklist">
+    The handful of things a script can't assert from the outside.
+  </Card>
+  <Card title="Page sync" icon="arrows-rotate" href="/guides/page-sync">
+    Implement `GET /pages` so Castro can recognise — and update — the pages it
+    crawled on your site.
+  </Card>
+</CardGroup>
+
+<Tip>
+Want to see a correct implementation before writing your own? A **reference
+receiver** covering the entire contract ships in the Castro repo at
+`dev/custom-receiver/server.js`. Run it, connect Castro to it, and watch every
+payload arrive live.
+</Tip>

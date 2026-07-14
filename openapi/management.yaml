@@ -1,0 +1,188 @@
+openapi: 3.1.0
+info:
+  title: Jorge Castro management API
+  version: "1.0"
+  summary: Endpoints on Jorge Castro's side — you call these, we implement them.
+  description: |
+    <div style="padding:12px 16px;border-left:3px solid #9827FC;background:rgba(152,39,252,0.06);border-radius:0 8px 8px 0;margin-bottom:16px">
+    <strong>These are the other direction.</strong> Unlike the contract endpoints —
+    which <em>you</em> implement and we call — <strong>we implement these and you call them</strong>.
+    </div>
+
+    Everything here relates to managing a custom integration: connecting your
+    website, checking the connection, and reading the delivery logs.
+
+    Most people never call these directly — the Jorge Castro UI does it for them
+    (Settings → Integration → Custom Website). They're documented for teams who
+    want to automate onboarding across many sites.
+
+    **The delivery logs are the fastest way to debug a failing integration**:
+    they record the exact payload we sent and the exact response you returned.
+  contact:
+    name: Jorge Castro
+    url: https://jorgecastro.ai
+servers:
+  - url: https://saas.jorgecastro.ai/back
+security: []
+tags:
+  - name: Connection
+  - name: Monitoring
+
+paths:
+  /integrations/connect-custom:
+    post:
+      tags: [Connection]
+      summary: Connect (or re-verify) a custom website
+      description: |
+        Runs the challenge handshake against your base URL and stores the
+        connection. Normally triggered from the Castro UI (Settings →
+        Integration → Custom Website), but you can call it directly. Re-running
+        it against the same site refreshes your declared capabilities.
+      operationId: connectCustom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brand_id, base_url]
+              properties:
+                brand_id:
+                  type: string
+                base_url:
+                  type: string
+                  example: https://your-site.com/api/castro
+      responses:
+        "200":
+          description: Connected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 1
+                  integration_id:
+                    type: string
+                  platform:
+                    type: string
+                    example: custom
+                  site_url:
+                    type: string
+                  capabilities:
+                    type: array
+                    items:
+                      type: string
+                  message:
+                    type: string
+        "400":
+          description: Handshake failed (unreachable URL, bad signature, missing required capabilities)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagementError"
+
+  /integrations/platform/status:
+    get:
+      tags: [Monitoring]
+      summary: Connection status
+      operationId: getStatus
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Integration status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                  data:
+                    type: object
+                    properties:
+                      integration_id:
+                        type: string
+                      brand_id:
+                        type: string
+                      site_url:
+                        type: string
+                      platform:
+                        type: string
+                      status:
+                        type: string
+                        example: connected
+
+  /integrations/platform/logs:
+    get:
+      tags: [Monitoring]
+      summary: Delivery logs
+      description: Every publish/update/delete Castro sent to your site, with payloads and results.
+      operationId: getLogs
+      security:
+        - apiKey: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, success, partial, failed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        log_id:
+                          type: string
+                        action:
+                          type: string
+                          example: send_posts
+                        status:
+                          type: string
+                        request_payload:
+                          type: string
+                        response_payload:
+                          type: string
+                        external_id:
+                          type: string
+                        create_at:
+                          type: string
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Your Castro connection key.
+  schemas:
+    ManagementError:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 0
+        error:
+          type: string

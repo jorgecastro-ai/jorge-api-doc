@@ -1,0 +1,242 @@
+---
+title: "Laravel"
+description: Middleware, routes and a partial-update controller
+icon: "laravel"
+---
+
+The signature covers the raw request body, so verification belongs in middleware
+— before anything parses the JSON.
+
+## 1. The signing middleware
+
+```bash
+php artisan make:middleware VerifyCastroSignature
+```
+
+```php app/Http/Middleware/VerifyCastroSignature.php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class VerifyCastroSignature
+{
+    // Castro signs with Date.now() — unix milliseconds.
+    private const MAX_SKEW_MS = 5 * 60 * 1000;
+
+    public function handle(Request $request, Closure $next)
+    {
+        $key = config('services.castro.key');
+
+        if (! hash_equals($key, (string) $request->header('X-API-Key'))) {
+            return response()->json(['error' => 'Invalid API key'], 401);
+        }
+
+        $timestamp = (string) $request->header('X-Castro-Timestamp');
+        $skew = abs(round(microtime(true) * 1000) - (int) $timestamp);
+
+        if ($skew > self::MAX_SKEW_MS) {
+            return response()->json(['error' => 'Stale request'], 401);
+        }
+
+        // getContent() is the RAW body. Never json_decode() and re-encode here —
+        // key order would shift and the signature would never match.
+        $expected = hash_hmac('sha256', $timestamp.'.'.$request->getContent(), $key);
+
+        if (! hash_equals($expected, (string) $request->header('X-Castro-Signature'))) {
+            return response()->json(['error' => 'Invalid signature'], 401);
+        }
+
+        return $next($request);
+    }
+}
+```
+
+Register it and add the key to your config:
+
+```php config/services.php
+'castro' => [
+    'key' => env('CASTRO_API_KEY'),
+],
+```
+
+```php bootstrap/app.php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->alias([
+        'castro' => \App\Http\Middleware\VerifyCastroSignature::class,
+    ]);
+})
+```
+
+## 2. Routes
+
+```php routes/api.php
+use App\Http\Controllers\CastroController;
+
+Route::middleware('castro')->prefix('castro')->group(function () {
+    Route::post('handshake', [CastroController::class, 'handshake']);
+
+    Route::post('posts', [CastroController::class, 'createPost']);
+    Route::put('posts/{id}', [CastroController::class, 'updatePost']);
+    Route::delete('posts/{id}', [CastroController::class, 'deletePost']);
+
+    Route::get('pages', [CastroController::class, 'listPages']);
+});
+```
+
+Your base URL in Castro is then `https://your-site.com/api/castro`.
+
+## 3. The controller
+
+```php app/Http/Controllers/CastroController.php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Post;
+use Illuminate\Http\Request;
+
+class CastroController extends Controller
+{
+    private const CAPABILITIES = [
+        'posts.create',
+        'posts.update',
+        'posts.delete',
+        'pages.list',
+    ];
+
+    // Prove we hold the same key. Sign with OUR stored key — never with the key
+    // that arrived in the request, which would prove nothing.
+    public function handshake(Request $request)
+    {
+        return response()->json([
+            'name' => config('app.name'),
+            'version' => '1.0',
+            'capabilities' => self::CAPABILITIES,
+            'challenge_response' => hash_hmac(
+                'sha256',
+                (string) $request->input('challenge'),
+                config('services.castro.key'),
+            ),
+        ]);
+    }
+
+    public function createPost(Request $request)
+    {
+        // Re-publishes of the same Castro content carry the same source_id.
+        $post = Post::firstOrNew(['source_id' => $request->input('source_id')]);
+
+        $post->fill([
+            'title' => $request->input('title'),
+            'body' => $request->input('content'),
+            'excerpt' => $request->input('excerpt', ''),
+            'status' => $request->input('status', 'publish'),
+            'author' => $request->input('author'),
+            'seo' => $request->input('seo', []),
+        ]);
+        $post->save();
+
+        $post->syncCategoryNames($request->input('categories', []));
+
+        return response()->json([
+            'id' => (string) $post->id,
+            'url' => $post->publicUrl(),
+        ], 201);
+    }
+
+    // PARTIAL update: apply only the keys the body actually contains. Castro's
+    // "Update Content" action sends nothing but { content, source_id } — a full
+    // replace here would erase the title, categories, author and SEO.
+    public function updatePost(Request $request, string $id)
+    {
+        $post = Post::find($id);
+
+        if (! $post) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        $map = [
+            'title' => 'title',
+            'content' => 'body',
+            'excerpt' => 'excerpt',
+            'status' => 'status',
+            'author' => 'author',
+        ];
+
+        foreach ($map as $incoming => $column) {
+            if ($request->has($incoming)) {
+                $post->{$column} = $request->input($incoming);
+            }
+        }
+
+        // Merge the SEO object — an SEO push carrying only a description must
+        // not wipe the title.
+        if ($request->has('seo')) {
+            $post->seo = array_merge($post->seo ?? [], $request->input('seo'));
+        }
+
+        $post->save();
+
+        if ($request->has('categories')) {
+            $post->syncCategoryNames($request->input('categories'));
+        }
+
+        return response()->json([
+            'id' => (string) $post->id,
+            'url' => $post->publicUrl(),
+        ]);
+    }
+
+    public function deletePost(string $id)
+    {
+        $post = Post::find($id);
+
+        if (! $post) {
+            return response()->json(['error' => 'Post not found'], 404);
+        }
+
+        $post->delete();
+
+        return response()->json(['deleted' => true, 'id' => $id]);
+    }
+
+    // Published pages only — Castro treats everything here as live.
+    public function listPages(Request $request)
+    {
+        $perPage = min((int) $request->query('per_page', 100), 500);
+
+        $pages = Post::where('status', 'publish')
+            ->paginate($perPage, ['*'], 'page', (int) $request->query('page', 1))
+            ->map(fn (Post $post) => [
+                'id' => (string) $post->id,
+                'url' => $post->publicUrl(),
+                'slug' => $post->slug,
+                'title' => $post->title,
+                'type' => 'post',
+                'categories' => $post->categories->pluck('name'),
+                'tags' => $post->tags->pluck('name'),
+            ]);
+
+        return response()->json($pages);
+    }
+}
+```
+
+<Warning>
+Use `$request->has()`, not `$request->input()` with a default, to decide whether
+a field was sent. `$request->input('title', $post->title)` looks like it handles
+the partial case — but an explicitly-sent empty string still overwrites, and a
+missing key silently rewrites the same value on every update.
+</Warning>
+
+## 4. Verify it
+
+```bash
+node castro-conformance.mjs https://your-site.com/api/castro <your-key>
+```
+
+The [conformance script](/testing) will tell you if the middleware rejects a bad
+signature and if your `PUT` really is partial — the two things this file exists
+to get right.

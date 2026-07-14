@@ -1,0 +1,1049 @@
+openapi: 3.1.0
+info:
+  title: Custom Integration contract (v1)
+  version: "1.0"
+  summary: The REST endpoints you implement so Jorge Castro can publish to your site.
+  description: |
+    <div style="padding:12px 16px;border-left:3px solid #9827FC;background:rgba(152,39,252,0.06);border-radius:0 8px 8px 0;margin-bottom:16px">
+    <strong>Read this backwards.</strong> Jorge Castro is the <em>client</em> here —
+    <strong>you implement these endpoints on your own server</strong>. Nothing below runs on
+    our infrastructure.
+    </div>
+
+    When a user clicks Publish, Update or Delete in Jorge Castro, our servers send
+    signed HTTPS requests to the base URL you registered (for example
+    `https://your-site.com/api/castro`) using the paths below. Your implementation
+    stores the content wherever your site reads it from, and returns the ids
+    described here.
+
+    ## Only three endpoints are required
+
+    `POST /handshake`, `POST /posts` and `PUT /posts/{id}`. Everything else is
+    optional: declare what you built in the handshake's `capabilities` array, and
+    Castro only ever calls what you declared. See
+    [Capabilities](/capabilities).
+
+    ## Two rules that govern every endpoint
+
+    **1. `PUT` is a partial update.** Only the fields present in the body change;
+    omitted fields keep their current values. Castro's *Update Content* action
+    sends nothing but `content` — treating that as a full replace erases the
+    user's title, categories and SEO. Create and update therefore have
+    **different schemas** below (`PostCreate` vs `PostUpdate`), and the difference
+    is the whole contract.
+
+    **2. Every request is signed.** Three headers travel with each one; verify the
+    HMAC over the **raw** request bytes, never over a re-serialized copy. See
+    [Authentication](/authentication).
+
+    ## Before you connect
+
+    Run the [conformance script](/testing) against your endpoints. It asserts both
+    rules above, plus that a bad signature is actually rejected.
+  contact:
+    name: Jorge Castro
+    url: https://jorgecastro.ai
+servers:
+  - url: https://your-site.com/{basePath}
+    description: Your server — the base URL you enter in Jorge Castro
+    variables:
+      basePath:
+        default: api/castro
+        description: Any prefix you like. Castro appends the paths below to it.
+
+# Applied to every operation: all three headers must be present and valid.
+security:
+  - apiKey: []
+    castroTimestamp: []
+    castroSignature: []
+tags:
+  - name: Handshake
+    description: Required — connection verification and capability discovery.
+  - name: Blog posts
+    description: Create and update are required; delete is optional (`posts.delete`).
+  - name: Blog categories
+    description: Optional — capability `blog_categories`.
+  - name: Authors
+    description: Optional — capability `authors`.
+  - name: Products
+    description: Optional — capability `products`. Copy only (no price/SKU/stock).
+  - name: Product categories
+    description: Optional — capability `product_categories`.
+  - name: SEO
+    description: Optional — capability `seo`.
+  - name: Pages
+    description: Optional — capability `pages.list`.
+
+paths:
+
+  /handshake:
+    post:
+      tags: [Handshake]
+      summary: Verify the connection
+      description: |
+        Called once when the user connects (or re-verifies) their website in
+        Castro. Prove you hold the API key by returning
+        `challenge_response = HMAC-SHA256(challenge, api_key)` as lowercase
+        hex, and declare which optional endpoints you implemented.
+
+        The connection is rejected unless `capabilities` includes both
+        `posts.create` and `posts.update`.
+      operationId: handshake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge]
+              properties:
+                challenge:
+                  type: string
+                  description: Random hex string to sign with your API key.
+                  example: 3f9a1c62b6d94f0e8a17c54b9d2e6f38a1b0c9d8e7f6a5b4c3d2e1f009876543
+      responses:
+        "200":
+          description: Connection accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HandshakeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /posts:
+    post:
+      tags: [Blog posts]
+      summary: Create a blog post (required)
+      description: |
+        Called when the user publishes a blog post. Store it in your system
+        and return an `id` — any string up to 191 characters. Castro stores it
+        verbatim and sends it back on every later update or delete.
+
+        Store `source_id` too: republishing the same content sends the same
+        `source_id`, so you can use it for idempotency.
+      operationId: createPost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostCreate"
+      responses:
+        "201":
+          description: Post created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+              example:
+                id: "8842"
+                url: https://your-site.com/blog/10-best-running-shoes
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /posts/{id}:
+    put:
+      tags: [Blog posts]
+      summary: Update a blog post (required)
+      description: |
+        **Partial update — apply only the fields present in the body.**
+
+        This is the rule most integrations get wrong, and the one that costs real
+        content. Castro's *Update Content* action sends nothing but `content`; a
+        full *Update Content & Metadata* sends every field. If you replace the
+        record with whatever arrived, the first case wipes the title, categories,
+        author and SEO the user set.
+
+        ```js
+        // WRONG — replaces the row with whatever arrived.
+        await db.posts.replace(id, body);
+
+        // RIGHT — merge only the keys that are present.
+        for (const [k, v] of Object.entries(body)) {
+          if (v !== undefined) post[k] = v;
+        }
+        ```
+      operationId: updatePost
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostUpdate"
+            examples:
+              contentOnly:
+                summary: Update Content — the case that breaks integrations
+                description: >
+                  Only the body changes. The title, categories, author and SEO
+                  stored on this post must survive untouched.
+                value:
+                  content: "<p>The revised article body.</p>"
+                  source_id: cnt_9f2ka83b
+              statusChange:
+                summary: Change status
+                value:
+                  status: draft
+              full:
+                summary: Update Content & Metadata
+                value:
+                  title: 10 Best Running Shoes in 2026
+                  content: "<p>Choosing the right running shoe...</p>"
+                  excerpt: Our tested picks for every kind of runner.
+                  status: publish
+                  categories: [Running, Gear]
+                  tags: [shoes, running]
+                  author: Jane Levy
+                  seo:
+                    title: 10 Best Running Shoes in 2026
+                    description: Our tested picks for every kind of runner.
+                    keywords: [running shoes]
+                  source_id: cnt_9f2ka83b
+      responses:
+        "200":
+          description: Post updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Blog posts]
+      summary: Delete a blog post
+      description: Optional — capability `posts.delete`.
+      operationId: deletePost
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Post deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /blog-categories:
+    get:
+      tags: [Blog categories]
+      summary: List blog categories
+      operationId: listBlogCategories
+      parameters:
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Category list (bare JSON array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Blog categories]
+      summary: Create a blog category
+      operationId: createBlogCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Created category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /blog-categories/{id}:
+    put:
+      tags: [Blog categories]
+      summary: Update a blog category
+      operationId: updateBlogCategory
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Blog categories]
+      summary: Delete a blog category
+      operationId: deleteBlogCategory
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Category deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /authors:
+    get:
+      tags: [Authors]
+      summary: List authors
+      operationId: listAuthors
+      parameters:
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Page"
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Author list (bare JSON array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Author"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Authors]
+      summary: Create an author
+      operationId: createAuthor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorInput"
+      responses:
+        "201":
+          description: Created author
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Author"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /authors/{id}:
+    get:
+      tags: [Authors]
+      summary: Get an author
+      operationId: getAuthor
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: The author
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Author"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Authors]
+      summary: Update an author
+      operationId: updateAuthor
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorInput"
+      responses:
+        "200":
+          description: Updated author
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Author"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Authors]
+      summary: Delete an author
+      operationId: deleteAuthor
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Author deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /products:
+    get:
+      tags: [Products]
+      summary: List products
+      description: Used to resolve a product id from its slug during bulk updates.
+      operationId: listProducts
+      parameters:
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Product list (bare JSON array) — `id` and `slug` are required per item
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductListItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Products]
+      summary: Create a product
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /products/{id}:
+    put:
+      tags: [Products]
+      summary: Update a product
+      description: "**Partial update** — content-only pushes send just `description`."
+      operationId: updateProduct
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+      responses:
+        "200":
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Products]
+      summary: Delete a product
+      operationId: deleteProduct
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Product deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /product-categories:
+    get:
+      tags: [Product categories]
+      summary: List product categories
+      operationId: listProductCategories
+      parameters:
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Category list (bare JSON array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Product categories]
+      summary: Create a product category
+      operationId: createProductCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCategory"
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /product-categories/{id}:
+    put:
+      tags: [Product categories]
+      summary: Update a product category
+      description: "**Partial update.**"
+      operationId: updateProductCategory
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCategory"
+      responses:
+        "200":
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Product categories]
+      summary: Delete a product category
+      operationId: deleteProductCategory
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      responses:
+        "200":
+          description: Category deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /seo:
+    put:
+      tags: [SEO]
+      summary: Update SEO metadata only
+      description: |
+        Update ONLY the SEO block of an entity — nothing else changes. The
+        target is identified by `id` (the id you returned at create time),
+        `url` (the live page URL) or `slug`; resolve whichever you receive.
+      operationId: updateSeo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seo]
+              properties:
+                id:
+                  type: string
+                  description: Entity id, when Castro has one stored.
+                url:
+                  type: string
+                  description: Live page URL, when the content was generated from a crawled page.
+                  example: https://your-site.com/shoes/trail-runner-x
+                slug:
+                  type: string
+                  example: trail-runner-x
+                seo:
+                  $ref: "#/components/schemas/Seo"
+      responses:
+        "200":
+          description: SEO updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+        "404":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /pages:
+    get:
+      tags: [Pages]
+      summary: List published pages
+      description: |
+        Lets Castro resolve which entity a crawled URL belongs to (bulk
+        updates match by slug). Return every publicly reachable page you want
+        Castro to be able to update.
+
+        Castro also uses this endpoint to sync page identity onto its crawl of
+        your site, so the richer each item is, the better. `categories` and
+        `tags` are optional — omit them and the sync still works, those fields
+        just stay empty in Castro.
+      operationId: listPages
+      parameters:
+        - $ref: "#/components/parameters/PerPage"
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Page list (bare JSON array)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [id, slug]
+                  properties:
+                    id:
+                      type: string
+                    url:
+                      type: string
+                    slug:
+                      type: string
+                    title:
+                      type: string
+                    type:
+                      type: string
+                      description: |
+                        Your own type label (post, product, page, ...). Castro
+                        maps the well-known ones onto its page classification:
+                        `product` -> Ecommerce Product Page,
+                        `product_cat` -> Ecommerce Category Page,
+                        `category` -> Category Page, `post` -> Blog Page.
+                        Anything else leaves Castro's own classification intact.
+                    categories:
+                      type: array
+                      description: Optional. Category names this page belongs to.
+                      items:
+                        type: string
+                    tags:
+                      type: array
+                      description: Optional. Tag names on this page.
+                      items:
+                        type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        The connection key the user generated in Jorge Castro
+        (Settings → Integration → Custom Website). Reject any request whose key
+        doesn't match yours.
+    castroTimestamp:
+      type: apiKey
+      in: header
+      name: X-Castro-Timestamp
+      description: |
+        Unix time in **milliseconds** when the request was signed — Castro uses
+        `Date.now()`. Reject anything more than a few minutes old.
+
+        A seconds-based comparison makes every request look ~55,000 years in the
+        future, and the freshness check then silently passes everything.
+    castroSignature:
+      type: apiKey
+      in: header
+      name: X-Castro-Signature
+      description: |
+        `HMAC-SHA256("{timestamp}.{rawBody}", api_key)`, lowercase hex.
+
+        `rawBody` is the **exact bytes** of the request body — empty for `GET`
+        and `DELETE`, which therefore sign over `"{timestamp}."`. Hash the raw
+        bytes, never a re-serialized copy of the parsed JSON: whitespace and key
+        order differences will break the comparison for some payloads and not
+        others, which reads as an intermittent bug.
+
+        Compare in constant time (`crypto.timingSafeEqual`, `hash_equals`,
+        `hmac.compare_digest`).
+  parameters:
+    EntityId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: |
+        The id **your** server returned when the entity was created. Castro
+        stores it verbatim and never rewrites it.
+      example: "8842"
+    PerPage:
+      name: per_page
+      in: query
+      description: Items per page. Castro asks for 100.
+      schema:
+        type: integer
+        default: 100
+    Page:
+      name: page
+      in: query
+      description: |
+        1-based page number. Castro keeps paging until it receives a page
+        **shorter** than `per_page`, so a full final page must be followed by an
+        empty one — otherwise it will keep asking.
+      schema:
+        type: integer
+        default: 1
+  responses:
+    Error:
+      description: |
+        Something went wrong. The `error` message is shown to the Castro user
+        **verbatim**, so write it for a person.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            notFound:
+              summary: Unknown id
+              value:
+                error: Post not found
+            rejected:
+              summary: Payload rejected
+              value:
+                error: "A title is required"
+    Unauthorized:
+      description: |
+        Authentication failed — bad API key, bad signature, or a stale
+        timestamp. Castro surfaces this as a connection problem and does not
+        retry.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            badSignature:
+              summary: Signature mismatch
+              value:
+                error: Invalid signature
+            stale:
+              summary: Timestamp too old
+              value:
+                error: Stale request
+    NotFound:
+      description: No entity exists with that id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: Post not found
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: |
+            Human-readable message, surfaced to the Castro user as-is. Make it
+            actionable — "Post not found" is useful, "Error" is not.
+          example: Post not found
+
+    PostCreate:
+      description: |
+        The body of `POST /posts`. `title`, `content` and `status` are always
+        present; the rest depend on what the user filled in.
+      allOf:
+        - $ref: "#/components/schemas/PostFields"
+        - type: object
+          required: [title, content, status]
+
+    PostUpdate:
+      description: |
+        The body of `PUT /posts/{id}` — a **partial** update. Any subset of the
+        fields may arrive, and **only those fields change**. Everything you are
+        not sent must keep its current value.
+
+        Three different Castro actions come through this one endpoint:
+
+        | Castro action | What you receive |
+        | --- | --- |
+        | Update Content & Metadata | Every field (same shape as create) |
+        | Update Content | `{ "content": "…", "source_id": "…" }` |
+        | Change status | `{ "status": "draft" }` |
+
+        Treat the second as a full replace and you erase the user's title,
+        categories, author and SEO. Nested objects follow the same rule — merge
+        `seo`, don't replace it.
+      allOf:
+        - $ref: "#/components/schemas/PostFields"
+
+    PostFields:
+      type: object
+      properties:
+        title:
+          type: string
+          example: 10 Best Running Shoes in 2026
+        content:
+          type: string
+          description: Post body as HTML. The H1 is already stripped — render `title` as your page heading.
+          example: "<p>Choosing the right running shoe...</p>"
+        excerpt:
+          type: string
+          description: Short summary / meta description text.
+        status:
+          type: string
+          enum: [publish, draft]
+        date:
+          type: string
+          description: Publish datetime, `YYYY-MM-DD HH:MM:SS`.
+          example: "2026-07-03 14:22:01"
+        categories:
+          type: array
+          items:
+            type: string
+          description: Category NAMES. Create any that don't exist yet.
+          example: [Running, Gear]
+        tags:
+          type: array
+          items:
+            type: string
+          example: [shoes, running]
+        author:
+          type: string
+          description: Author display name.
+          example: Jane Levy
+        featured_image:
+          type: string
+          description: URL of the featured image, hosted by Castro.
+        reading_time:
+          type: string
+          example: 5 minutes
+        seo:
+          $ref: "#/components/schemas/Seo"
+        source_id:
+          type: string
+          description: Castro's internal content id — store it for idempotency.
+          example: cnt_9f2ka83b
+    Seo:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+    Product:
+      type: object
+      description: Copy-only product payload — no price, SKU or stock.
+      properties:
+        name:
+          type: string
+          example: Trail Runner X
+        type:
+          type: string
+          example: simple
+        description:
+          type: string
+          description: Product body as HTML.
+        short_description:
+          type: string
+        categories:
+          type: array
+          items:
+            type: string
+          description: Product category NAMES.
+        tags:
+          type: array
+          items:
+            type: string
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              alt:
+                type: string
+        status:
+          type: string
+          enum: [publish, draft]
+        source_id:
+          type: string
+    ProductListItem:
+      type: object
+      required: [id, slug]
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+    ProductCategory:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          description: Category body copy as HTML.
+        image:
+          type: string
+          description: Image URL.
+        source_id:
+          type: string
+    Category:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        parent:
+          type: string
+    CategoryInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        slug:
+          type: string
+        parent:
+          type: string
+    Author:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        description:
+          type: string
+        url:
+          type: string
+    AuthorInput:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        description:
+          type: string
+        role:
+          type: string
+        url:
+          type: string
+    EntityResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          maxLength: 191
+          description: Your id for the entity — any string; Castro stores it verbatim.
+          example: "8842"
+        url:
+          type: string
+          description: Public URL of the entity (optional but recommended).
+          example: https://your-site.com/blog/10-best-running-shoes
+    DeleteResponse:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        id:
+          type: string
+    HandshakeResponse:
+      type: object
+      required: [capabilities, challenge_response]
+      properties:
+        name:
+          type: string
+          description: Your integration's display name.
+          example: Acme Store Backend
+        version:
+          type: string
+          example: "1.0"
+        capabilities:
+          type: array
+          description: |
+            Which endpoints you implemented. MUST include `posts.create` and
+            `posts.update`.
+          items:
+            type: string
+            enum:
+              - posts.create
+              - posts.update
+              - posts.delete
+              - blog_categories
+              - authors
+              - products
+              - product_categories
+              - seo
+              - pages.list
+        challenge_response:
+          type: string
+          description: HMAC-SHA256 of the challenge, keyed with your API key, lowercase hex.

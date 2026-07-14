@@ -1,0 +1,244 @@
+---
+title: Troubleshooting
+description: The failures that actually happen, and how to fix each one
+icon: "wrench"
+---
+
+Almost every failed integration fails in one of the ways below. Find your symptom,
+not your theory.
+
+<Note>
+Castro shows you the real HTTP status and your own error message for every
+request, in **Settings → Integration → Custom Website → Logs**. Start there —
+the answer is usually in your own response body.
+</Note>
+
+## Connecting
+
+<AccordionGroup>
+  <Accordion title="“Connection failed” when I click Connect website" icon="plug-circle-xmark">
+    Castro couldn't reach your `/handshake`, or didn't like the answer. In order
+    of likelihood:
+
+    **Your base URL isn't publicly reachable.** Castro's servers call *you*.
+    `http://localhost:3000` works only on your own machine. Deploy it, or use a
+    tunnel (`ngrok http 3000`) while developing.
+
+    **The path is wrong.** You give Castro a *base URL*, not a full endpoint. If
+    your handshake lives at `https://site.com/api/castro/handshake`, the base URL
+    is `https://site.com/api/castro` — Castro appends `/handshake` itself.
+
+    **Your server rejected Castro's own signature.** The handshake request is
+    signed like every other request. If your signature check is broken, the
+    handshake never even runs. Confirm with:
+
+    ```bash
+    node castro-conformance.mjs https://your-site.com/api/castro <key>
+    ```
+  </Accordion>
+
+  <Accordion title="“Handshake verification failed” — my endpoint returned 200" icon="key">
+    Your server answered, but the `challenge_response` was wrong.
+
+    **The classic mistake:** signing the challenge with the key that arrived in
+    the request header instead of your own stored key.
+
+    ```js
+    // WRONG — hands a valid response to anyone who asks. Proves nothing.
+    const key = req.headers["x-api-key"];
+    challenge_response: crypto.createHmac("sha256", key).update(challenge).digest("hex")
+
+    // RIGHT — proves YOU hold the same secret Castro holds.
+    challenge_response: crypto.createHmac("sha256", API_KEY).update(challenge).digest("hex")
+    ```
+
+    Note it's `HMAC(challenge)` — the challenge string on its own. No timestamp,
+    no dot, no body. That formula is only for request signatures.
+  </Accordion>
+
+  <Accordion title="Connection rejected: missing required capabilities" icon="ban">
+    Your handshake's `capabilities` array must contain **both** `posts.create`
+    and `posts.update`. An integration that can't publish or update a post has
+    nothing to offer Castro, so the connection is refused rather than left in a
+    half-working state.
+  </Accordion>
+</AccordionGroup>
+
+## Authentication
+
+<AccordionGroup>
+  <Accordion title="Every request comes back 401 — but my key is definitely right" icon="binary">
+    You're almost certainly verifying the signature over **re-serialized JSON**
+    instead of the raw bytes.
+
+    The signature covers exactly what came down the wire. The moment you
+    `JSON.parse()` and re-`stringify()`, key order and whitespace can shift, and
+    the HMAC no longer matches. The nasty part: it matches for *some* payloads,
+    so it looks intermittent.
+
+    <CodeGroup>
+    ```js Node / Express
+    // Capture the raw bytes BEFORE the JSON parser touches them.
+    app.use(express.json({ verify: (req, res, buf) => (req.rawBody = buf) }));
+
+    const expected = crypto
+      .createHmac("sha256", API_KEY)
+      .update(Buffer.concat([Buffer.from(`${ts}.`), req.rawBody]))
+      .digest("hex");
+    ```
+
+    ```php PHP
+    // Never json_decode() then re-encode for the signature.
+    $rawBody = file_get_contents("php://input");
+    $expected = hash_hmac("sha256", $ts . "." . $rawBody, $apiKey);
+    ```
+
+    ```python Python / Flask
+    raw = request.get_data()          # bytes, not request.json
+    msg = f"{ts}.".encode() + raw
+    expected = hmac.new(key.encode(), msg, hashlib.sha256).hexdigest()
+    ```
+    </CodeGroup>
+  </Accordion>
+
+  <Accordion title="401 with a timestamp complaint" icon="clock">
+    `X-Castro-Timestamp` is unix **milliseconds** — Castro signs with
+    `Date.now()`. If you compare it against a seconds-based clock, every request
+    looks about 55,000 years in the future.
+
+    ```js
+    // WRONG
+    const skew = Math.abs(Date.now() / 1000 - Number(ts));
+
+    // RIGHT
+    const skew = Math.abs(Date.now() - Number(ts));
+    if (skew > 5 * 60 * 1000) return res.status(401).json({ error: "Stale request" });
+    ```
+
+    In PHP, `time()` is seconds — use `round(microtime(true) * 1000)`. In Python,
+    `time.time()` is float seconds — use `time.time() * 1000`.
+  </Accordion>
+
+  <Accordion title="GET and DELETE requests fail, POST and PUT work" icon="circle-half-stroke">
+    Requests without a body sign over `"{timestamp}."` — the timestamp, a dot,
+    and an **empty string**. If your code skips the dot when the body is empty,
+    or signs over the literal string `"null"` or `"undefined"`, the HMAC won't
+    match.
+
+    ```js
+    const raw = req.rawBody?.toString() ?? "";   // "" for GET/DELETE, never "null"
+    const message = `${ts}.${raw}`;
+    ```
+  </Accordion>
+
+  <Accordion title="Everything worked, then suddenly every request is 401" icon="rotate">
+    The connection key was regenerated in Castro. Rotating the key immediately
+    invalidates the old one and marks the site disconnected.
+
+    Update the key on your server, then click **Connect website** again in Castro.
+  </Accordion>
+</AccordionGroup>
+
+## Publishing
+
+<AccordionGroup>
+  <Accordion title="Updating a post erased its title, categories or SEO" icon="triangle-exclamation">
+    **This is the single most expensive bug in this contract**, and it is always
+    the same cause: treating `PUT /posts/{id}` as a full replace.
+
+    The update is **partial**. Apply only the fields present in the body; leave
+    everything else exactly as it was. Castro's *Update Content* action sends
+    only `{ content, source_id }` — if you overwrite the whole record with that,
+    the title and every other field become empty.
+
+    ```js
+    // WRONG — replaces the row with whatever arrived.
+    await db.posts.replace(id, req.body);
+
+    // RIGHT — merge only the keys that are present.
+    const patch = {};
+    for (const [k, v] of Object.entries(req.body)) {
+      if (v !== undefined) patch[k] = v;
+    }
+    await db.posts.update(id, patch);
+    ```
+
+    Nested `seo` deserves the same care: an SEO push carrying only a
+    `description` must not wipe the `title`. Merge the object, don't replace it.
+
+    The [conformance script](/testing) asserts this. If it passes, you're safe.
+  </Accordion>
+
+  <Accordion title="Publishing the same content twice creates duplicate posts" icon="copy">
+    Use `source_id`. Every payload for the same piece of Castro content carries
+    the same `source_id`, so you can recognise a re-publish:
+
+    ```js
+    const existing = await db.posts.findBySourceId(body.source_id);
+    const post = existing
+      ? await db.posts.update(existing.id, body)
+      : await db.posts.create(body);
+    ```
+
+    Store it on create, and index it.
+  </Accordion>
+
+  <Accordion title="Categories arrive as names, and I expected ids" icon="tags">
+    They are names — strings — on purpose. Castro has no idea what your category
+    ids look like. Create any category that doesn't exist yet, then attach it.
+
+    The same is true of `tags` and `author`.
+  </Accordion>
+
+  <Accordion title="The post published, but the heading appears twice" icon="heading">
+    `content` is HTML with the **H1 already removed**. Render `title` as the page
+    heading yourself. If you're also injecting the title into the body, you'll
+    get it twice.
+  </Accordion>
+
+  <Accordion title="Castro says an action “is not supported by this integration”" icon="toggle-off">
+    You didn't declare the capability that action needs. Castro never calls an
+    endpoint you didn't declare, even if you built it.
+
+    Add it to your `/handshake` response, then click **Re-verify connection** in
+    Castro (Settings → Integration → Custom Website → Manage). No key rotation
+    needed — see [capabilities](/capabilities).
+  </Accordion>
+</AccordionGroup>
+
+## Page sync
+
+<AccordionGroup>
+  <Accordion title="The “Sync pages from your site” button isn't there" icon="rotate-right">
+    Page sync needs the `pages.list` capability. Implement `GET /pages`, add
+    `"pages.list"` to your handshake's capability array, and click **Re-verify
+    connection**. The button appears once Castro sees the capability.
+  </Accordion>
+
+  <Accordion title="Sync runs but matches nothing" icon="link-slash">
+    Sync matches the URLs from your `GET /pages` against the URLs Castro crawled.
+    They have to be the **same URLs**.
+
+    - Return **absolute** URLs (`https://site.com/blog/hello`), not paths.
+    - Use the canonical form — pick one of `https://` vs `http://`, `www` vs
+      bare, trailing slash vs none, and be consistent with what your site
+      actually serves.
+    - Make sure Castro has **crawled** your site at all. Sync stamps identity
+      onto crawled pages; with no crawl, there's nothing to stamp. Run a crawl
+      first.
+
+    Pages Castro has never crawled aren't lost — they're queued for crawling, and
+    the next sync matches them.
+  </Accordion>
+
+  <Accordion title="Draft pages showed up as live pages on my site" icon="eye-slash">
+    `GET /pages` lists **published** pages only. Castro treats everything you
+    return as publicly reachable: it crawls those URLs and, if one wasn't in the
+    crawl, queues it. Filter drafts out of that list.
+  </Accordion>
+</AccordionGroup>
+
+## Still stuck?
+
+Run the [conformance script](/testing) and send the output to support. It tells
+us in one paste which side of the contract is broken.

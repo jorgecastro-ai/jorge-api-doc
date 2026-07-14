@@ -1,0 +1,38 @@
+---
+title: Authors
+description: Author management for the blog editor
+icon: "user-pen"
+---
+
+Declare the `authors` capability to power Castro's author picker and author
+management. Blog posts always carry the author's **display name** in the
+`author` field of the post payload — this surface only manages the list users
+pick from.
+
+Implement:
+
+- `GET /authors?per_page=&page=&search=` → bare JSON array
+- `GET /authors/{id}` → one author
+- `POST /authors` → create; `{ "username", "email" }` are always present, plus
+  optional `display_name`, `first_name`, `last_name`, `description`, `role`,
+  `url`
+- `PUT /authors/{id}` → partial update
+- `DELETE /authors/{id}` → `{ "deleted": true, "id" }`
+
+Author object shape:
+
+```json
+{
+  "id": "7",
+  "username": "jane",
+  "email": "jane@your-site.com",
+  "display_name": "Jane Levy",
+  "first_name": "Jane",
+  "last_name": "Levy",
+  "description": "Running gear reviewer.",
+  "url": "https://your-site.com/authors/jane"
+}
+```
+
+If your platform has no user system, a simple `authors` table (or even a JSON
+file) with names is enough — Castro only needs the names back.

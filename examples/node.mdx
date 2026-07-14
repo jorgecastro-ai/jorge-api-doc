@@ -1,0 +1,82 @@
+---
+title: "Node.js"
+description: Express receiver with signature verification
+icon: "node-js"
+---
+
+A minimal Express implementation of the required surface plus delete. The
+same route pattern extends to every optional endpoint.
+
+```js
+const express = require("express");
+const crypto = require("crypto");
+
+const API_KEY = process.env.CASTRO_API_KEY; // from Settings → Integration
+const app = express();
+
+// Capture the raw body — signatures are computed over the exact bytes sent.
+app.use(express.json({ verify: (req, res, buf) => (req.rawBody = buf) }));
+
+app.use("/api/castro", (req, res, next) => {
+  if (req.headers["x-api-key"] !== API_KEY)
+    return res.status(401).json({ error: "Invalid API key" });
+  const ts = req.headers["x-castro-timestamp"] || "";
+  const expected = crypto
+    .createHmac("sha256", API_KEY)
+    .update(Buffer.concat([Buffer.from(`${ts}.`), req.rawBody || Buffer.alloc(0)]))
+    .digest("hex");
+  const given = String(req.headers["x-castro-signature"] || "");
+  const ok =
+    given.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+  if (!ok) return res.status(401).json({ error: "Invalid signature" });
+  next();
+});
+
+// ── Handshake (required) ────────────────────────────────────────────────────
+app.post("/api/castro/handshake", (req, res) => {
+  res.json({
+    name: "My Site",
+    version: "1.0",
+    capabilities: ["posts.create", "posts.update", "posts.delete"],
+    challenge_response: crypto
+      .createHmac("sha256", API_KEY)
+      .update(String(req.body.challenge))
+      .digest("hex"),
+  });
+});
+
+// ── Posts ───────────────────────────────────────────────────────────────────
+app.post("/api/castro/posts", async (req, res) => {
+  const { title, content, excerpt, status, categories, author, seo, source_id } = req.body;
+  // Idempotency: re-publishes carry the same source_id.
+  const existing = await db.posts.findBySourceId(source_id);
+  const post = existing
+    ? await db.posts.update(existing.id, { title, html: content, excerpt, status })
+    : await db.posts.create({ title, html: content, excerpt, status, categories, author, seo, source_id });
+  res.status(201).json({ id: String(post.id), url: post.publicUrl });
+});
+
+// Partial update: only touch the fields present in the body.
+app.put("/api/castro/posts/:id", async (req, res) => {
+  const post = await db.posts.patch(req.params.id, req.body);
+  if (!post) return res.status(404).json({ error: "Post not found" });
+  res.json({ id: req.params.id, url: post.publicUrl });
+});
+
+app.delete("/api/castro/posts/:id", async (req, res) => {
+  const removed = await db.posts.remove(req.params.id);
+  if (!removed) return res.status(404).json({ error: "Post not found" });
+  res.json({ deleted: true, id: req.params.id });
+});
+
+app.listen(3000);
+```
+
+<Tip>
+A **zero-dependency reference receiver** implementing the *entire* contract
+(all optional endpoints, in-memory store, request logging) ships in the Castro
+repo at `dev/custom-receiver/server.js` — run it with
+`API_KEY=<key> node server.js` and connect Castro to `http://localhost:4567`
+to see every payload live.
+</Tip>

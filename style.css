@@ -1,0 +1,169 @@
+/* Jorge Castro brand overrides for Mintlify.
+ *
+ * docs.json already carries the brand purple (#9827FC = the app's `action`
+ * token) for links, buttons and the sidebar. What it can't reach is the callout
+ * components, which ship with Mintlify's default blue.
+ *
+ * Only the INFORMATIONAL callouts (<Note> / <Info>) are rebranded. <Warning>
+ * stays amber and <Tip> / <Check> stay green on purpose: those colours carry
+ * meaning, and a purple warning stops reading as a warning.
+ *
+ * Tokens, from client/src/styles/colors.module.scss:
+ *   action #9827FC   pink #C27AFF   hover #8004EC
+ *   text   #171725 (light) / #FFFFFF (dark)
+ */
+
+:root {
+  --jc-action: #9827fc;
+  --jc-action-light: #9827fc;
+  --jc-text: #171725;
+  --jc-text-dark: #ffffff;
+  --jc-thumb: rgba(152, 39, 252, 0.28);
+  --jc-thumb-hover: rgba(152, 39, 252, 0.55);
+}
+
+.dark {
+  /* The brand purple needs a touch more weight to read against #151526. */
+  --jc-thumb: rgba(194, 122, 255, 0.28);
+  --jc-thumb-hover: rgba(194, 122, 255, 0.6);
+}
+
+/* ── Scrollbars ───────────────────────────────────────────────────────────── */
+/* Chromium on Windows renders the default chunky grey bar, arrow buttons and
+   all — it looks like a 1998 file manager bolted to the sidebar.
+
+   The two styling APIs are mutually exclusive: the moment `scrollbar-width` is
+   set, Chromium ignores every ::-webkit-scrollbar rule — including the one that
+   removes the arrow buttons. So they must NOT be combined.
+
+   Chromium/Safari therefore get the ::-webkit-* path (full control, no arrows),
+   and Firefox — which has no ::-webkit-scrollbar — gets the standard properties
+   below. The @supports test keys off exactly that difference. */
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--jc-thumb);
+  border-radius: 999px;
+  /* A transparent border + padding-box clip insets the thumb, so it reads as a
+     floating pill rather than a bar wedged against the edge. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--jc-thumb-hover);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The up/down arrow buttons — the ugliest part of the default bar. */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Firefox: no ::-webkit-scrollbar support, so fall back to the standard
+   properties. Scoped so Chromium never sees them (setting scrollbar-width there
+   would disable everything above). */
+@supports (scrollbar-width: thin) and (not selector(::-webkit-scrollbar)) {
+  html,
+  #sidebar-content,
+  [id$="-content"],
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto {
+    scrollbar-width: thin;
+    scrollbar-color: var(--jc-thumb) transparent;
+  }
+}
+
+/* Everything below lives INSIDE @layer utilities on purpose.
+ *
+ * Mintlify puts `[&_strong]:text-current!` — i.e. `color: currentcolor !important`
+ * — on its callouts, from inside the `utilities` layer. Cascade layers reverse
+ * the usual precedence for !important: an !important declaration in ANY layer
+ * beats an !important declaration outside every layer. So an unlayered override
+ * silently loses, even with !important on it.
+ *
+ * Joining the same layer puts us on equal footing, and source order (this file
+ * loads last) then decides in our favour.
+ *
+ * Selectors key off data-callout-type, which is far more stable than matching
+ * Mintlify's generated Tailwind classes.
+ */
+@layer utilities {
+  /* ── Surface ───────────────────────────────────────────────────────────── */
+
+  .callout[data-callout-type="note"],
+  .callout[data-callout-type="info"] {
+    border-color: rgba(152, 39, 252, 0.3) !important;
+    background-color: rgba(152, 39, 252, 0.06) !important;
+  }
+
+  .dark .callout[data-callout-type="note"],
+  .dark .callout[data-callout-type="info"] {
+    border-color: rgba(152, 39, 252, 0.45) !important;
+    background-color: rgba(152, 39, 252, 0.16) !important;
+  }
+
+  /* ── Icon ──────────────────────────────────────────────────────────────── */
+  /* The colour sits on the <svg> itself (text-blue-800 dark:text-blue-300), not
+     on the wrapper — so styling the wrapper alone does nothing. */
+
+  .callout[data-callout-type="note"] [data-component-part="callout-icon"] svg,
+  .callout[data-callout-type="info"] [data-component-part="callout-icon"] svg {
+    color: var(--jc-action) !important;
+  }
+
+  .dark
+    .callout[data-callout-type="note"]
+    [data-component-part="callout-icon"]
+    svg,
+  .dark
+    .callout[data-callout-type="info"]
+    [data-component-part="callout-icon"]
+    svg {
+    color: var(--jc-action-light) !important;
+  }
+
+  /* ── Body copy ─────────────────────────────────────────────────────────── */
+  /* The text lives in a `.prose` wrapper, not in a <p> — Mintlify renders the
+     callout body as a bare span. Colour the wrapper and let it inherit down;
+     <strong> keeps its own rule below, since a direct rule always beats an
+     inherited value. */
+
+  .callout[data-callout-type="note"] .prose,
+  .callout[data-callout-type="info"] .prose {
+    color: var(--jc-text) !important;
+  }
+
+  .dark .callout[data-callout-type="note"] .prose,
+  .dark .callout[data-callout-type="info"] .prose {
+    color: var(--jc-text-dark) !important;
+  }
+
+  /* ── Bold lead-in ──────────────────────────────────────────────────────── */
+  /* "You never poll Castro." — the eye should land on the point being made. */
+
+  .callout[data-callout-type="note"] strong,
+  .callout[data-callout-type="info"] strong {
+    color: var(--jc-action) !important;
+  }
+
+  .dark .callout[data-callout-type="note"] strong,
+  .dark .callout[data-callout-type="info"] strong {
+    color: var(--jc-action-light) !important;
+  }
+}

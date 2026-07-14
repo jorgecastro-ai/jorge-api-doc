@@ -1,0 +1,66 @@
+---
+title: SEO updates
+description: Metadata-only pushes that don't touch the content
+icon: "magnifying-glass-chart"
+---
+
+## SEO-only updates — `PUT /seo`
+
+Declare the `seo` capability and Castro's "Update Metadata" action pushes just
+the SEO block — title tag, meta description, keywords — without touching the
+entity's content:
+
+```json
+{
+  "url": "https://your-site.com/shoes/trail-runner-x",
+  "slug": "trail-runner-x",
+  "id": "8842",
+  "seo": {
+    "title": "Trail Runner X — Lightweight Trail Shoe",
+    "description": "Rock plate, 240g, grippy outsole. Free shipping.",
+    "keywords": ["trail shoe", "trail runner x"]
+  }
+}
+```
+
+## Resolving the target
+
+The entity is identified by whichever of `id`, `url` or `slug` is present — often
+all three. Resolve them in that order of confidence: your stored id first, then
+the URL, then the slug against your page table.
+
+Respond `200` with `{ "id": "..." }`, or `404` + `{ "error": "..." }` if nothing
+matches.
+
+<Warning>
+**Merge the SEO object, don't replace it.** A push carrying only a `description`
+must not wipe the `title` you stored earlier. This is the same partial-update
+rule that governs [blog posts](/guides/blog-posts#update--put-postsid) — and it's
+just as easy to get wrong here.
+
+```js
+entity.seo = { ...entity.seo, ...body.seo };   // not: entity.seo = body.seo
+```
+</Warning>
+
+## Where to store it
+
+That depends on your stack — a `meta` table, frontmatter fields, or your SEO
+plugin's storage. What matters is that the page's rendered `<title>` and
+`<meta name="description">` actually reflect the values.
+
+The quickest way to confirm the whole path works: push an SEO update from Castro,
+then load the page and look at the browser tab. If the title didn't change, the
+value isn't reaching your template.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Page sync" icon="arrows-rotate" href="/guides/page-sync">
+    `GET /pages` lets Castro map its crawl of your site onto your entity ids —
+    which is what makes bulk SEO updates possible in the first place.
+  </Card>
+  <Card title="Test it" icon="flask" href="/testing">
+    The conformance script checks `PUT /seo` and the SEO merge rule.
+  </Card>
+</CardGroup>

@@ -1,0 +1,96 @@
+---
+title: Responses & errors
+description: What to return, and what Castro does with it
+icon: "circle-exclamation"
+---
+
+Castro treats your HTTP status code as the truth. Get the codes right and the
+Castro user sees exactly what happened; get them wrong and a silent failure looks
+like a success.
+
+## Success responses
+
+| Endpoint | Status | Body |
+| --- | --- | --- |
+| `POST /handshake` | `200` | `{ name, version, capabilities, challenge_response }` |
+| `POST /posts` · `POST /products` · … | `201` | `{ "id": "<your id>", "url": "<public url>" }` |
+| `PUT /posts/{id}` · `PUT /seo` · … | `200` | `{ "id": "<your id>" }` |
+| `DELETE /posts/{id}` | `200` | `{ "deleted": true, "id": "<your id>" }` |
+| `GET /pages` · `GET /authors` · … | `200` | A bare JSON array |
+
+<Note>
+**The `id` you return on create is permanent.** Castro stores it verbatim and
+uses it in the path of every later call about that entity. Any string up to 191
+characters works — a database id, a UUID, a slug. Just never change it.
+</Note>
+
+### List endpoints return a bare array
+
+```json
+[{ "id": "1", "name": "Guides" }, { "id": "2", "name": "Gear" }]
+```
+
+An `{ "items": [...] }` wrapper is also accepted, but the bare array is the
+documented shape — prefer it.
+
+## Error responses
+
+Any non-2xx response should carry a message:
+
+```json
+{ "error": "Post not found" }
+```
+
+**That message is shown to the Castro user verbatim.** Write it for a person, not
+a log file. `"Post not found"` is useful. `"Error"` is not.
+
+## What Castro does with each status
+
+| Status | What it means to Castro | What the user sees |
+| --- | --- | --- |
+| `2xx` | Success. The `id` is stored. | The publish succeeds |
+| `400` | Your server rejected the payload | Your `error` message |
+| `401` | Authentication failed | A connection problem, and the request is not retried |
+| `404` | The entity id is unknown to you | Your `error` message |
+| `5xx` | Your server broke | Your `error` message, surfaced as a failure |
+
+Every request and response — including your error body — is recorded in the
+integration logs, so a user can always see the raw exchange.
+
+<Warning>
+**Never return `200` for a failure.** If a post could not be saved, say so with a
+`4xx` or `5xx`. A `200` tells Castro the content is live on your site, and it will
+be treated that way — including in later updates that will then hit an id that
+doesn't exist.
+</Warning>
+
+## Idempotency
+
+Every payload for the same piece of Castro content carries the same **`source_id`**.
+Use it to recognise a re-publish instead of creating a duplicate:
+
+```js
+const existing = await db.posts.findBySourceId(body.source_id);
+const post = existing
+  ? await db.posts.update(existing.id, body)
+  : await db.posts.create(body);
+
+res.status(201).json({ id: String(post.id), url: post.publicUrl });
+```
+
+Store `source_id` on create and index it. Networks retry; users double-click.
+
+## The partial update rule
+
+It's worth stating once more, because it's the rule that costs real content:
+
+<Warning>
+On every `PUT`, apply **only the fields present in the body**. A body that
+contains just `{ "content": "..." }` must not blank out the title, categories,
+author or SEO.
+</Warning>
+
+Nested objects follow the same rule — merge `seo`, don't replace it.
+
+The [conformance script](/testing) asserts this, and the
+[troubleshooting guide](/troubleshooting#publishing) shows the two-line fix.

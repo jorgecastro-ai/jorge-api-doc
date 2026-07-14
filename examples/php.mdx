@@ -1,0 +1,79 @@
+---
+title: "PHP"
+description: Plain-PHP receiver (framework-free) with signature verification
+icon: "php"
+---
+
+A single-file receiver you can adapt to Laravel/Symfony routes. Point Castro
+at `https://your-site.com/castro.php` as the base URL — or mount the same
+logic under a route group.
+
+```php
+<?php
+// castro.php — Castro Custom Integration receiver
+$API_KEY = getenv('CASTRO_API_KEY');
+
+$raw  = file_get_contents('php://input');
+$body = $raw ? json_decode($raw, true) : null;
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+if (($_SERVER['HTTP_X_API_KEY'] ?? '') !== $API_KEY) {
+    http_response_code(401);
+    exit(json_encode(['error' => 'Invalid API key']));
+}
+$ts = $_SERVER['HTTP_X_CASTRO_TIMESTAMP'] ?? '';
+$expected = hash_hmac('sha256', $ts . '.' . $raw, $API_KEY);
+if (!hash_equals($expected, $_SERVER['HTTP_X_CASTRO_SIGNATURE'] ?? '')) {
+    http_response_code(401);
+    exit(json_encode(['error' => 'Invalid signature']));
+}
+
+// Path relative to this script, e.g. /posts or /posts/8842
+$path   = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$route  = trim(substr($path, strlen(dirname($path) === '/' ? '' : '')), '/');
+$parts  = array_values(array_filter(explode('/', preg_replace('#^.*castro\.php/?#', '', $path))));
+$method = $_SERVER['REQUEST_METHOD'];
+header('Content-Type: application/json');
+
+function respond(int $code, array $data): void {
+    http_response_code($code);
+    exit(json_encode($data));
+}
+
+// ── Handshake (required) ─────────────────────────────────────────────────────
+if ($method === 'POST' && ($parts[0] ?? '') === 'handshake') {
+    respond(200, [
+        'name' => 'My Site',
+        'version' => '1.0',
+        'capabilities' => ['posts.create', 'posts.update', 'posts.delete'],
+        'challenge_response' => hash_hmac('sha256', $body['challenge'] ?? '', $API_KEY),
+    ]);
+}
+
+// ── Posts ────────────────────────────────────────────────────────────────────
+if ($method === 'POST' && ($parts[0] ?? '') === 'posts') {
+    // $body: title, content (HTML, H1 removed), excerpt, status, categories,
+    // tags, author, featured_image, seo{title,description,keywords}, source_id
+    $id = create_post($body);                 // your persistence
+    respond(201, ['id' => (string)$id, 'url' => post_url($id)]);
+}
+
+if ($method === 'PUT' && ($parts[0] ?? '') === 'posts' && isset($parts[1])) {
+    // PARTIAL update: only change the keys present in $body.
+    $ok = patch_post($parts[1], $body);
+    $ok ? respond(200, ['id' => $parts[1]])
+        : respond(404, ['error' => 'Post not found']);
+}
+
+if ($method === 'DELETE' && ($parts[0] ?? '') === 'posts' && isset($parts[1])) {
+    $ok = delete_post($parts[1]);
+    $ok ? respond(200, ['deleted' => true, 'id' => $parts[1]])
+        : respond(404, ['error' => 'Post not found']);
+}
+
+respond(404, ['error' => 'Unknown route']);
+```
+
+Add the optional surfaces (`/blog-categories`, `/authors`, `/products`,
+`/product-categories`, `/seo`, `/pages`) with the same dispatch pattern and
+declare them in the handshake's `capabilities`.

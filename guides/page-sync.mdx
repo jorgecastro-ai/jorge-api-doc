@@ -1,0 +1,175 @@
+---
+title: Page sync
+description: Let Castro recognise which entity each page on your site actually is
+icon: "arrows-rotate"
+---
+
+Castro crawls your website. The crawler sees URLs and HTML — nothing else. It has
+no way to know that `https://your-site.com/blog/hello` is, in *your* database,
+post **id 42**.
+
+That matters, because every update Castro sends goes to `PUT /posts/{id}`. Without
+the id, Castro can see a page on your site but cannot touch it.
+
+**Page sync closes that gap.** Castro asks your site for a list of its pages —
+with ids — and stamps each entity's identity onto the matching crawled URL.
+
+```text
+Before sync                              After sync
+──────────────────────────────────       ──────────────────────────────────
+/blog/hello   →  id: ?                   /blog/hello   →  id: 42
+                 title: (from HTML)                       title: Hello
+                 type: (guessed)                          type: Blog Page
+                 ✗ cannot be updated                      categories: [Guides]
+                                                          ✓ Castro can update it
+```
+
+## What you implement
+
+One endpoint, gated by the `pages.list` capability.
+
+### `GET /pages`
+
+Return every **published**, publicly reachable entity you want Castro to be able
+to update — posts, products, categories, authors. Support `per_page` and `page`
+query parameters (Castro asks for 100 at a time).
+
+```json
+[
+  {
+    "id": "42",
+    "url": "https://your-site.com/blog/hello",
+    "slug": "hello",
+    "title": "Hello",
+    "type": "post",
+    "categories": ["Guides"],
+    "tags": ["intro"]
+  },
+  {
+    "id": "8842",
+    "url": "https://your-site.com/shop/trail-runner-x",
+    "slug": "trail-runner-x",
+    "title": "Trail Runner X",
+    "type": "product",
+    "categories": ["Trail Shoes"],
+    "tags": []
+  }
+]
+```
+
+<ResponseField name="id" type="string" required>
+  Your id — the same one you returned from `POST /posts` or `POST /products`.
+  This is the whole point of the endpoint.
+</ResponseField>
+
+<ResponseField name="slug" type="string" required>
+  Used as a fallback match when the URL doesn't line up exactly.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  The **absolute**, canonical public URL. This is what Castro matches against its
+  crawl, so it must be the URL your site actually serves.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Stored against the page in Castro and shown throughout the UI.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Your own type label. Castro maps the well-known ones onto its page
+  classification — see the table below.
+</ResponseField>
+
+<ResponseField name="categories" type="string[]">
+  Optional. Category names. Omit it and sync still works; the field just stays
+  empty in Castro.
+</ResponseField>
+
+<ResponseField name="tags" type="string[]">
+  Optional, same as `categories`.
+</ResponseField>
+
+## How `type` is interpreted
+
+| You send | Castro classifies the page as |
+| --- | --- |
+| `product` | Ecommerce Product Page |
+| `product_cat` | Ecommerce Category Page |
+| `category` | Category Page |
+| `post` | Blog Page |
+| anything else (`page`, or your own label) | Castro keeps its own classification |
+
+Sending a label Castro doesn't recognise is not an error — it just means Castro
+trusts what its crawler worked out instead.
+
+## What happens when sync runs
+
+<Steps>
+  <Step title="Castro pages through GET /pages">
+    100 entities at a time, a few requests in parallel. Castro stops when it gets
+    a short page, so **the last page must be shorter than `per_page`** — the
+    standard pagination contract. A site with a million pages is streamed, never
+    buffered.
+  </Step>
+  <Step title="Each page is matched by URL">
+    Against the URLs Castro crawled. This is the fast path, and it's why the `url`
+    you return must be the canonical one your site serves.
+  </Step>
+  <Step title="Anything unmatched falls back to slug">
+    Last path segment, compared case-insensitively — this rescues the usual
+    mismatches (trailing slash, `www`, `http` vs `https`).
+  </Step>
+  <Step title="Still unmatched pages get queued for a crawl">
+    A published page Castro has never crawled isn't dropped. Castro queues it,
+    crawls it, and the next sync matches it. Nothing is lost.
+  </Step>
+</Steps>
+
+## When sync runs
+
+You don't have to do anything to trigger it — it fires from three places:
+
+<CardGroup cols={3}>
+  <Card title="The Sync button" icon="hand-pointer">
+    **Settings → Integration → Custom Website → Sync pages from your site.**
+    Only appears if you declared `pages.list`.
+  </Card>
+  <Card title="Right after connecting" icon="plug">
+    So a freshly connected site is identified immediately.
+  </Card>
+  <Card title="After every crawl" icon="spider">
+    New pages appear in the crawl, so their identity is stamped straight away.
+  </Card>
+</CardGroup>
+
+## Making sure Castro can find your pages
+
+Sync stamps identity onto pages Castro **has crawled**. If Castro's crawler never
+reached a page, sync has nothing to attach the id to (it'll queue it, but that's
+a slower round-trip).
+
+Help the crawler:
+
+- Publish a **`sitemap.xml`** listing every public page.
+- Make sure the URLs in your sitemap are the same ones you return from
+  `GET /pages`.
+- Don't put page content behind JavaScript that only renders client-side, if you
+  can avoid it.
+
+<Warning>
+Return **published pages only**. Castro treats everything in this list as live —
+it will crawl those URLs and queue any it hasn't seen. A draft in the list becomes
+a real page in Castro's view of your site.
+</Warning>
+
+## Verify it
+
+The [conformance script](/testing) checks that `GET /pages` returns a bare JSON
+array, that a published post appears in it, and that the post's title survived a
+partial update — which is what page sync reads back.
+
+<Check>
+Once sync has run, open any crawled page in Castro. It should show your entity id
+and title. If it shows neither, work through the
+[page sync troubleshooting](/troubleshooting#page-sync).
+</Check>

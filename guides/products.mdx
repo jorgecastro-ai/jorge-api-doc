@@ -1,0 +1,52 @@
+---
+title: Products
+description: Product page publishing and updates
+icon: "tag"
+---
+
+Declare the `products` capability to let Castro publish and update product
+pages (and `product_categories` for category pages).
+
+## Create — `POST /products`
+
+```json
+{
+  "name": "Trail Runner X",
+  "type": "simple",
+  "description": "<p>Built for rocky descents...</p>",
+  "short_description": "Lightweight trail shoe with rock plate.",
+  "categories": ["Shoes", "Trail"],
+  "tags": ["trail", "running"],
+  "images": [{ "url": "https://…", "alt": "Trail Runner X" }],
+  "status": "publish",
+  "source_id": "cnt_7d1xk20a"
+}
+```
+
+<Note>
+The payload is **copy only** — Castro writes titles, descriptions and SEO, and
+never touches price, SKU or inventory. Merge the copy into your existing
+product records.
+</Note>
+
+Respond `201` with `{ "id": "...", "url": "..." }`.
+
+## Update — `PUT /products/{id}`
+
+Partial update. A full product push sends every field above; a content-only
+push sends just:
+
+```json
+{ "description": "<p>New body copy…</p>", "source_id": "cnt_7d1xk20a" }
+```
+
+## List — `GET /products`
+
+Used to resolve a product's id from its URL slug when Castro updates a page it
+discovered by crawling your site. Return an array of
+`{ "id": "...", "slug": "...", "name": "..." }`; support `per_page`/`page`
+pagination.
+
+## Delete — `DELETE /products/{id}`
+
+Respond `{ "deleted": true, "id": "..." }`.

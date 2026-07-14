@@ -1,0 +1,430 @@
+---
+title: Test your implementation
+description: Prove your endpoints are correct before a single real post depends on them
+icon: "flask"
+---
+
+You can connect a broken integration. Castro will happily complete the handshake,
+publish a post, and report success — while your `PUT /posts/{id}` quietly wipes
+the title off every post it touches.
+
+This page gives you a **conformance script** that finds those bugs in about ten
+seconds. Run it before you connect, and again after any change to your endpoints.
+
+<Note>
+The script is a single file with **zero dependencies**. It needs Node 18+ (for
+built-in `fetch`) and nothing else. Nothing is installed, nothing phones home.
+</Note>
+
+## Run it
+
+<Steps>
+  <Step title="Save the script">
+    Copy the code below into a file called `castro-conformance.mjs`.
+  </Step>
+  <Step title="Point it at your endpoints">
+    ```bash
+    node castro-conformance.mjs https://your-site.com/api/castro <your-connection-key>
+    ```
+
+    Run it against a **staging** environment first — it creates and deletes real
+    content.
+  </Step>
+  <Step title="Fix what fails">
+    Every failure prints what was expected and what came back. The
+    [troubleshooting guide](/troubleshooting) explains each one.
+  </Step>
+</Steps>
+
+## What it checks — and why each one matters
+
+The script only tests things that actually break in production. It reads your
+declared capabilities from the handshake and skips whatever you didn't implement.
+
+<AccordionGroup>
+  <Accordion title="The handshake proves you hold the key" icon="key">
+    Your `challenge_response` must equal `HMAC-SHA256(challenge, your_key)`.
+
+    The subtle failure here: signing the challenge with the key that arrived in
+    the **request header** instead of your own stored key. That returns a valid
+    response to *anybody* who asks, which proves nothing at all. The script
+    catches it by sending a challenge and checking the answer against the key
+    you passed on the command line.
+  </Accordion>
+
+  <Accordion title="A partial update is really partial" icon="pen-to-square">
+    This is the one that costs you real content.
+
+    Castro's **Update Content** action sends only `{ content, source_id }`. If you
+    treat `PUT /posts/{id}` as a full replace, every such update erases the
+    title, categories, author and SEO the user carefully set.
+
+    The script publishes a post with all of those fields, sends a body-only
+    update, then reads the post back and asserts the title survived.
+  </Accordion>
+
+  <Accordion title="A bad signature is actually rejected" icon="shield-halved">
+    It's easy to write signature verification that never says no — a `try/catch`
+    that swallows the mismatch, or a comparison against an undefined variable.
+
+    The script sends a deliberately wrong signature and requires a `401`. If your
+    server returns `200`, your endpoints are open to the internet.
+  </Accordion>
+
+  <Accordion title="You verify over the raw body, not re-serialized JSON" icon="binary">
+    The signature covers the **exact bytes** Castro sent. If you parse the JSON
+    and re-stringify it to verify, key order and whitespace shift, and the
+    signature will never match — but only for some payloads, which makes it look
+    intermittent.
+
+    The script sends a body whose key order changes under a naive re-serialize,
+    so a raw-body bug fails here instead of in production.
+  </Accordion>
+
+  <Accordion title="Timestamps are milliseconds, not seconds" icon="clock">
+    Castro signs with `Date.now()` — unix **milliseconds**. Reject anything more
+    than a few minutes old.
+
+    The script sends a seconds-based timestamp and requires a `401`. If you
+    accept it, your replay window is roughly 50,000 years wide.
+  </Accordion>
+
+  <Accordion title="Drafts stay out of GET /pages" icon="eye-slash">
+    `GET /pages` is defined as listing **published** pages. Castro treats
+    everything you return as live and publicly reachable — a draft in that list
+    gets queued for crawling and shows up as a real page.
+  </Accordion>
+</AccordionGroup>
+
+## The script
+
+```js castro-conformance.mjs
+// Castro Custom Integration — conformance check.
+//   node castro-conformance.mjs <baseUrl> <apiKey>
+// Node 18+. No dependencies.
+
+import crypto from "node:crypto";
+
+const BASE = (process.argv[2] || "").replace(/\/+$/, "");
+const KEY = process.argv[3] || process.env.CASTRO_API_KEY;
+
+if (!BASE || !KEY) {
+  console.error("usage: node castro-conformance.mjs <baseUrl> <apiKey>");
+  process.exit(2);
+}
+
+let pass = 0;
+let fail = 0;
+const skipped = [];
+
+const sign = (ts, raw, key = KEY) =>
+  crypto.createHmac("sha256", key).update(`${ts}.${raw}`).digest("hex");
+
+async function call(method, path, body, opts = {}) {
+  // opts.raw lets a test send exact bytes (used by the raw-body check below).
+  const raw = opts.raw ?? (body == null ? "" : JSON.stringify(body));
+  const ts = opts.ts ?? String(Date.now());
+  const key = opts.key ?? KEY;
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": key,
+        "X-Castro-Timestamp": ts,
+        "X-Castro-Signature": opts.sig ?? sign(ts, raw, key),
+      },
+      body: method === "GET" || method === "DELETE" ? undefined : raw || undefined,
+    });
+  } catch (e) {
+    return { status: 0, data: { error: `network: ${e.message}` } };
+  }
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  return { status: res.status, ok: res.ok, data };
+}
+
+function check(name, ok, detail = "") {
+  if (ok) {
+    pass++;
+    console.log(`  \x1b[32mPASS\x1b[0m  ${name}`);
+  } else {
+    fail++;
+    console.log(`  \x1b[31mFAIL\x1b[0m  ${name}`);
+    if (detail) console.log(`        ${detail}`);
+  }
+}
+
+console.log(`\nCastro conformance → ${BASE}\n`);
+
+// ── Handshake ───────────────────────────────────────────────────────────────
+console.log("Handshake");
+const challenge = crypto.randomBytes(16).toString("hex");
+const hs = await call("POST", "/handshake", { challenge });
+
+check("POST /handshake responds 200", hs.status === 200, JSON.stringify(hs.data));
+
+const expected = crypto.createHmac("sha256", KEY).update(challenge).digest("hex");
+check(
+  "challenge_response is HMAC(challenge, your key)",
+  hs.data?.challenge_response === expected,
+  "Sign the challenge with YOUR stored key — never with the key from the request header.",
+);
+
+const caps = Array.isArray(hs.data?.capabilities) ? hs.data.capabilities : [];
+check(
+  "declares the two required capabilities",
+  caps.includes("posts.create") && caps.includes("posts.update"),
+  `got: [${caps.join(", ")}]`,
+);
+const can = (c) => caps.includes(c);
+
+// ── Posts ───────────────────────────────────────────────────────────────────
+console.log("\nPosts");
+const created = await call("POST", "/posts", {
+  title: "Castro conformance check",
+  content: "<p>Original body.</p>",
+  excerpt: "Delete me.",
+  status: "publish",
+  categories: ["Conformance"],
+  tags: ["castro"],
+  author: "Castro",
+  seo: { title: "Conformance SEO title", description: "Conformance SEO description" },
+  source_id: `conformance-${Date.now()}`,
+});
+check("POST /posts responds 201", created.status === 201, JSON.stringify(created.data));
+
+const id = created.data?.id;
+check("create returns { id, url }", Boolean(id && created.data?.url), JSON.stringify(created.data));
+
+if (!id) {
+  console.log("\nNo id returned — cannot continue.\n");
+  process.exit(1);
+}
+
+// The one that costs real content: a body-only update must not erase anything.
+const updated = await call("PUT", `/posts/${id}`, { content: "<p>Updated body only.</p>" });
+check("PUT /posts/{id} responds 200", updated.status === 200, JSON.stringify(updated.data));
+
+if (can("pages.list")) {
+  const pages = await call("GET", "/pages?per_page=100&page=1");
+  check("GET /pages responds 200", pages.status === 200);
+  check("GET /pages returns a bare JSON array", Array.isArray(pages.data), JSON.stringify(pages.data)?.slice(0, 120));
+
+  const mine = (pages.data || []).find((p) => String(p.id) === String(id));
+  check("the post appears in GET /pages", Boolean(mine), "A published post must be listed.");
+  check(
+    "PARTIAL UPDATE preserved the title",
+    mine?.title === "Castro conformance check",
+    `title is now: ${JSON.stringify(mine?.title)} — a body-only PUT must not overwrite other fields.`,
+  );
+} else {
+  skipped.push("partial-update verification (needs pages.list to read the post back)");
+}
+
+// ── Optional surfaces ───────────────────────────────────────────────────────
+console.log("\nOptional endpoints");
+if (can("blog_categories")) {
+  const r = await call("POST", "/blog-categories", { name: "Conformance", description: "temp" });
+  check("POST /blog-categories responds 2xx", r.status >= 200 && r.status < 300, JSON.stringify(r.data));
+  const list = await call("GET", "/blog-categories");
+  check("GET /blog-categories returns an array", Array.isArray(list.data));
+} else skipped.push("blog_categories");
+
+if (can("authors")) {
+  // Authors are named with display_name / username — NOT `name`. This is the
+  // exact body Castro's author picker sends.
+  const r = await call("POST", "/authors", {
+    display_name: "Castro Conformance",
+    username: "castro-conformance",
+    email: "conformance@example.com",
+    description: "Temporary author created by the conformance check.",
+  });
+  check("POST /authors responds 2xx", r.status >= 200 && r.status < 300, JSON.stringify(r.data));
+} else skipped.push("authors");
+
+if (can("products")) {
+  // Products are named with `name`, and the body is HTML in `description`.
+  const r = await call("POST", "/products", {
+    name: "Conformance product",
+    type: "simple",
+    description: "<p>Temporary product created by the conformance check.</p>",
+    short_description: "Temporary.",
+    categories: ["Conformance"],
+    tags: [],
+    images: [],
+    status: "publish",
+    source_id: `conformance-product-${Date.now()}`,
+  });
+  check("POST /products responds 2xx", r.status >= 200 && r.status < 300, JSON.stringify(r.data));
+} else skipped.push("products");
+
+if (can("product_categories")) {
+  const r = await call("POST", "/product-categories", {
+    name: "Conformance",
+    description: "<p>Temporary category.</p>",
+    image: "",
+    source_id: `conformance-cat-${Date.now()}`,
+  });
+  check("POST /product-categories responds 2xx", r.status >= 200 && r.status < 300, JSON.stringify(r.data));
+} else skipped.push("product_categories");
+
+if (can("seo")) {
+  const r = await call("PUT", "/seo", {
+    id: String(id),
+    seo: { title: "SEO-only push", description: "Pushed via PUT /seo" },
+  });
+  check("PUT /seo responds 200", r.status === 200, JSON.stringify(r.data));
+} else skipped.push("seo");
+
+// ── Authentication: these MUST be rejected ──────────────────────────────────
+console.log("\nAuthentication (these must be REJECTED)");
+
+const badSig = await call("GET", can("pages.list") ? "/pages" : "/handshake", null, {
+  sig: "0".repeat(64),
+});
+check("wrong signature → 401", badSig.status === 401, `got ${badSig.status} — your endpoints are unprotected.`);
+
+const wrongKey = "not-the-real-key";
+const decoy = crypto.randomBytes(8).toString("hex");
+const badKey = await call("POST", "/handshake", { challenge: decoy }, { key: wrongKey });
+check("wrong API key → 401", badKey.status === 401, `got ${badKey.status}`);
+
+// If the server answered anyway, check WHY — a handshake that signs with the
+// caller's key hands a valid response to anyone, which is the worst version of
+// this bug and invisible while you're testing with the correct key.
+const echoed = crypto.createHmac("sha256", wrongKey).update(decoy).digest("hex");
+check(
+  "handshake signs with YOUR key, not the caller's",
+  badKey.data?.challenge_response !== echoed,
+  "Your /handshake echoed a challenge_response computed with the key from the request header. That authenticates ANYONE. Sign with your own stored key.",
+);
+
+const seconds = String(Math.floor(Date.now() / 1000));
+const oldTs = await call("POST", "/handshake", { challenge: "x" }, {
+  ts: seconds,
+  sig: sign(seconds, JSON.stringify({ challenge: "x" })),
+});
+check(
+  "seconds-instead-of-milliseconds timestamp → 401",
+  oldTs.status === 401,
+  `got ${oldTs.status} — reject timestamps more than a few minutes old. Castro signs with Date.now() (ms).`,
+);
+
+// A pretty-printed body. The signature covers these exact bytes, whitespace and
+// all. A server that re-serializes the parsed JSON to verify will compute the
+// HMAC over compact bytes instead, and reject a request that is perfectly valid.
+const prettyRaw = JSON.stringify({ content: "<p>Raw-body check.</p>" }, null, 2);
+const rawTs = String(Date.now());
+const rawCheck = await call("PUT", `/posts/${id}`, null, {
+  raw: prettyRaw,
+  ts: rawTs,
+  sig: sign(rawTs, prettyRaw),
+});
+check(
+  "signature verified over the RAW body",
+  rawCheck.status === 200,
+  `got ${rawCheck.status} — you are hashing a re-serialized copy of the body, not the bytes received. Capture the raw body before parsing.`,
+);
+
+// ── Cleanup ─────────────────────────────────────────────────────────────────
+if (can("posts.delete")) {
+  console.log("\nCleanup");
+  const del = await call("DELETE", `/posts/${id}`);
+  check("DELETE /posts/{id} responds 200", del.status === 200, JSON.stringify(del.data));
+} else {
+  skipped.push("posts.delete");
+  console.log(`\nNote: test post ${id} was left behind (no posts.delete capability).`);
+}
+
+// ── Summary ─────────────────────────────────────────────────────────────────
+console.log(`\n${pass} passed, ${fail} failed`);
+if (skipped.length) console.log(`skipped (not declared): ${skipped.join(", ")}`);
+console.log("");
+process.exit(fail ? 1 : 0);
+```
+
+## A clean run
+
+```text
+Castro conformance → https://your-site.com/api/castro
+
+Handshake
+  PASS  POST /handshake responds 200
+  PASS  challenge_response is HMAC(challenge, your key)
+  PASS  declares the two required capabilities
+
+Posts
+  PASS  POST /posts responds 201
+  PASS  create returns { id, url }
+  PASS  PUT /posts/{id} responds 200
+  PASS  GET /pages responds 200
+  PASS  GET /pages returns a bare JSON array
+  PASS  the post appears in GET /pages
+  PASS  PARTIAL UPDATE preserved the title
+
+Optional endpoints
+  PASS  POST /blog-categories responds 2xx
+  PASS  GET /blog-categories returns an array
+  PASS  POST /authors responds 2xx
+  PASS  POST /products responds 2xx
+  PASS  POST /product-categories responds 2xx
+  PASS  PUT /seo responds 200
+
+Authentication (these must be REJECTED)
+  PASS  wrong signature → 401
+  PASS  wrong API key → 401
+  PASS  handshake signs with YOUR key, not the caller's
+  PASS  seconds-instead-of-milliseconds timestamp → 401
+  PASS  signature verified over the RAW body
+
+Cleanup
+  PASS  DELETE /posts/{id} responds 200
+
+22 passed, 0 failed
+```
+
+A failure names the fix, not just the symptom:
+
+```text
+  FAIL  PARTIAL UPDATE preserved the title
+        title is now: "" — a body-only PUT must not overwrite other fields.
+
+  FAIL  signature verified over the RAW body
+        got 401 — you are hashing a re-serialized copy of the body, not the
+        bytes received. Capture the raw body before parsing.
+```
+
+<Check>
+All green? You're ready to [connect](/quickstart#connect-your-website). Work
+through the [checklist](/checklist) for the handful of things a script can't
+assert.
+</Check>
+
+## Testing without touching your backend
+
+Not ready to point this at real code? Run the **reference receiver** — a
+complete, correct implementation of the entire contract — and run the script
+against that first, so you know what a passing run looks like:
+
+<CodeGroup>
+```bash Reference receiver
+API_KEY=test-key node server.js      # from dev/custom-receiver in the Castro repo
+node castro-conformance.mjs http://localhost:4567 test-key
+```
+
+```bash Your implementation
+node castro-conformance.mjs http://localhost:3000/api/castro test-key
+```
+</CodeGroup>
+
+<Warning>
+The script publishes and deletes real content. Point it at staging, or at a
+throwaway environment — never at a production site with live traffic.
+</Warning>

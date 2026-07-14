@@ -1,0 +1,43 @@
+---
+title: Categories
+description: Blog categories and product categories
+icon: "folder-tree"
+---
+
+There are two independent category surfaces, each behind its own capability.
+
+## Blog categories — `blog_categories`
+
+Powers the category picker in Castro's blog editor. Implement:
+
+- `GET /blog-categories?per_page=&page=` → bare JSON array of
+  `{ "id", "name", "slug", "description", "parent" }`
+- `POST /blog-categories` with `{ "name", "description", "slug", "parent" }` →
+  the created category object
+- `PUT /blog-categories/{id}` (partial) → the updated object
+- `DELETE /blog-categories/{id}` → `{ "deleted": true, "id" }`
+
+<Note>
+Even without this capability, blog posts still arrive with `categories` as an
+array of **names** in the post payload — the picker in the editor just won't
+list your existing ones.
+</Note>
+
+## Product categories — `product_categories`
+
+Category *pages* that Castro writes copy for (e.g. a collection page with an
+SEO description). Implement the same CRUD shape on `/product-categories`.
+Create/update bodies:
+
+```json
+{
+  "name": "Trail Shoes",
+  "description": "<p>Category page body copy…</p>",
+  "image": "https://…",
+  "source_id": "cnt_5k8xq11z"
+}
+```
+
+Create/update responses use `{ "id": "...", "url": "..." }`; the list endpoint
+must include `id` and `slug` per item (used for slug→id resolution during bulk
+updates).

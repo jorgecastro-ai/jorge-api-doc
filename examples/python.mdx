@@ -1,0 +1,77 @@
+---
+title: "Python"
+description: FastAPI receiver with signature verification
+icon: "python"
+---
+
+```python
+import hashlib
+import hmac
+import os
+
+from fastapi import FastAPI, HTTPException, Request
+
+API_KEY = os.environ["CASTRO_API_KEY"]  # from Settings → Integration
+app = FastAPI()
+
+
+async def verify(request: Request) -> dict:
+    raw = await request.body()
+    if request.headers.get("x-api-key") != API_KEY:
+        raise HTTPException(401, "Invalid API key")
+    ts = request.headers.get("x-castro-timestamp", "")
+    expected = hmac.new(API_KEY.encode(), f"{ts}.".encode() + raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, request.headers.get("x-castro-signature", "")):
+        raise HTTPException(401, "Invalid signature")
+    return await request.json() if raw else {}
+
+
+@app.post("/api/castro/handshake")
+async def handshake(request: Request):
+    body = await verify(request)
+    return {
+        "name": "My Site",
+        "version": "1.0",
+        "capabilities": ["posts.create", "posts.update", "posts.delete"],
+        "challenge_response": hmac.new(
+            API_KEY.encode(), body["challenge"].encode(), hashlib.sha256
+        ).hexdigest(),
+    }
+
+
+@app.post("/api/castro/posts", status_code=201)
+async def create_post(request: Request):
+    body = await verify(request)
+    # body: title, content (HTML, H1 removed), excerpt, status, categories,
+    # tags, author, featured_image, seo{...}, source_id (store for idempotency)
+    post = await db.create_post(body)  # your persistence
+    return {"id": str(post.id), "url": post.public_url}
+
+
+@app.put("/api/castro/posts/{post_id}")
+async def update_post(post_id: str, request: Request):
+    body = await verify(request)
+    # PARTIAL update: only change the keys present in body.
+    post = await db.patch_post(post_id, body)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    return {"id": post_id, "url": post.public_url}
+
+
+@app.delete("/api/castro/posts/{post_id}")
+async def delete_post(post_id: str, request: Request):
+    await verify(request)
+    if not await db.delete_post(post_id):
+        raise HTTPException(404, "Post not found")
+    return {"deleted": True, "id": post_id}
+```
+
+<Note>
+FastAPI raises `HTTPException` bodies as `{"detail": "..."}` — Castro expects
+`{"error": "..."}`. Add a small exception handler that renames the field so
+your error messages surface cleanly to the Castro user.
+</Note>
+
+Extend with the optional endpoints (`/blog-categories`, `/authors`,
+`/products`, `/product-categories`, `/seo`, `/pages`) and declare each in the
+handshake's `capabilities`.

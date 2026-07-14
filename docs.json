@@ -1,0 +1,94 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Jorge Castro Developer Docs",
+  "description": "Publish content from Jorge Castro to any tech stack",
+  "colors": {
+    "primary": "#9827FC",
+    "light": "#9827FC",
+    "dark": "#9827FC"
+  },
+  "background": {
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#151526"
+    }
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.png",
+    "dark": "/logo/dark.png",
+    "href": "https://jorgecastro.ai"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "icon": "rocket",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication",
+              "capabilities"
+            ]
+          },
+          {
+            "group": "Publishing guides",
+            "icon": "pen-to-square",
+            "pages": [
+              "guides/blog-posts",
+              "guides/products",
+              "guides/categories",
+              "guides/authors",
+              "guides/seo",
+              "guides/page-sync"
+            ]
+          },
+          {
+            "group": "Going live",
+            "icon": "circle-check",
+            "pages": ["testing", "errors", "troubleshooting", "checklist"]
+          },
+          {
+            "group": "Reference implementations",
+            "icon": "code",
+            "pages": [
+              "examples/node",
+              "examples/laravel",
+              "examples/php",
+              "examples/python"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Your endpoints (the contract)",
+            "openapi": "openapi/contract.yaml"
+          },
+          {
+            "group": "Castro endpoints",
+            "openapi": "openapi/management.yaml"
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Open Jorge Castro",
+      "href": "https://saas.jorgecastro.ai"
+    }
+  },
+  "footer": {
+    "socials": {
+      "website": "https://jorgecastro.ai"
+    }
+  }
+}

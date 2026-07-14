@@ -1,0 +1,68 @@
+---
+title: Blog posts
+description: The publish, update and delete lifecycle
+icon: "newspaper"
+---
+
+## Create — `POST /posts`
+
+Sent when the user publishes a blog post. Example payload:
+
+```json
+{
+  "title": "10 Best Running Shoes in 2026",
+  "content": "<p>Choosing the right running shoe...</p>",
+  "excerpt": "Our tested picks for every kind of runner.",
+  "status": "publish",
+  "date": "2026-07-03 14:22:01",
+  "categories": ["Running", "Gear"],
+  "tags": ["shoes", "running"],
+  "author": "Jane Levy",
+  "featured_image": "https://storage.googleapis.com/jorge_castro/….png",
+  "reading_time": "5 minutes",
+  "seo": {
+    "title": "10 Best Running Shoes in 2026",
+    "description": "Our tested picks for every kind of runner.",
+    "keywords": ["running shoes", "best running shoes"]
+  },
+  "source_id": "cnt_9f2ka83b"
+}
+```
+
+Implementation notes:
+
+- **`content` is HTML with the H1 already removed** — render `title` as the
+  page heading yourself.
+- **`categories` are names**, not ids. Create any that don't exist.
+- **`status`** is `publish` or `draft`, driven by the user's publishing mode.
+- **`featured_image`** is a URL hosted by Castro; download it or hotlink it.
+- Respond `201` with `{ "id": "<your id>", "url": "<public url>" }`. The id is
+  any string up to 191 chars — Castro stores it verbatim and uses it for every
+  later call about this post.
+- Store **`source_id`** — a re-publish of the same Castro content carries the
+  same `source_id`, so you can deduplicate instead of creating twins.
+
+## Update — `PUT /posts/{id}`
+
+**Partial update**: apply only the fields present, leave the rest untouched.
+This one rule powers three different Castro actions:
+
+| Castro action | Body you receive |
+| --- | --- |
+| Update Content & Metadata | Every field (same shape as create) |
+| Update Content | `{ "content": "...", "source_id": "..." }` |
+| Change status | `{ "status": "draft" }` |
+
+Respond `200` with `{ "id": "..." }`, or `404` + `{ "error": "Post not found" }`
+if the id is unknown.
+
+## Delete — `DELETE /posts/{id}`
+
+Optional (capability `posts.delete`). Delete or unpublish the post — your
+choice, as long as it disappears from the live site. Respond
+`{ "deleted": true, "id": "..." }`.
+
+## Errors
+
+Any non-2xx response with `{ "error": "message" }` is surfaced to the Castro
+user verbatim — make the message actionable.

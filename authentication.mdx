@@ -1,0 +1,135 @@
+---
+title: Authentication
+description: API key and HMAC request signatures
+icon: "lock"
+---
+
+Every request Castro sends to your server carries three headers:
+
+| Header | Value |
+| --- | --- |
+| `X-API-Key` | Your connection key (generated in Castro) |
+| `X-Castro-Timestamp` | Unix time in **milliseconds** when the request was signed |
+| `X-Castro-Signature` | `HMAC-SHA256("{timestamp}.{rawBody}", api_key)` as lowercase hex |
+
+For requests without a body (`GET`, `DELETE`), the signature is computed over
+`"{timestamp}."` — the timestamp, a dot, and an empty string.
+
+## Minimum: check the API key
+
+At the very least, reject any request whose `X-API-Key` doesn't equal your
+stored key. This alone prevents anyone else from writing to your endpoints.
+
+## Recommended: verify the signature
+
+The signature proves the request was produced by someone holding the key and
+that the body wasn't modified in transit. Compute the HMAC over the **raw
+request bytes** (before JSON parsing) and compare with a constant-time check:
+
+<CodeGroup>
+
+```js Node
+const crypto = require("crypto");
+
+function verify(req, rawBody, apiKey) {
+  if (req.headers["x-api-key"] !== apiKey) return false;
+  const ts = req.headers["x-castro-timestamp"] || "";
+  const expected = crypto
+    .createHmac("sha256", apiKey)
+    .update(`${ts}.${rawBody}`)
+    .digest("hex");
+  const given = String(req.headers["x-castro-signature"] || "");
+  return (
+    given.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
+  );
+}
+```
+
+```php PHP
+function verify(string $rawBody, string $apiKey): bool {
+    if (($_SERVER['HTTP_X_API_KEY'] ?? '') !== $apiKey) return false;
+    $ts = $_SERVER['HTTP_X_CASTRO_TIMESTAMP'] ?? '';
+    $expected = hash_hmac('sha256', $ts . '.' . $rawBody, $apiKey);
+    return hash_equals($expected, $_SERVER['HTTP_X_CASTRO_SIGNATURE'] ?? '');
+}
+```
+
+```python Python
+import hashlib, hmac
+
+def verify(headers: dict, raw_body: bytes, api_key: str) -> bool:
+    if headers.get("x-api-key") != api_key:
+        return False
+    ts = headers.get("x-castro-timestamp", "")
+    message = f"{ts}.".encode() + raw_body
+    expected = hmac.new(api_key.encode(), message, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, headers.get("x-castro-signature", ""))
+```
+
+</CodeGroup>
+
+<Warning>
+Sign the **raw body bytes**, not a re-serialized version of the parsed JSON —
+key order or whitespace differences would break the comparison. In Express,
+capture the raw body with `express.json({ verify: (req, res, buf) => (req.rawBody = buf) })`.
+</Warning>
+
+## Replay protection
+
+Reject requests whose `X-Castro-Timestamp` is more than a few minutes old. Note
+the unit — Castro signs with `Date.now()`, so it's **milliseconds**. A
+seconds-based comparison makes every request look ~55,000 years in the future,
+and the check silently passes everything.
+
+```js
+if (Math.abs(Date.now() - Number(ts)) > 5 * 60 * 1000)
+  return res.status(401).json({ error: "Stale request" });
+```
+
+## The handshake challenge
+
+When the user connects their site, Castro POSTs `{ "challenge": "<hex>" }` to
+your `/handshake`. Respond with
+`challenge_response = HMAC-SHA256(challenge, api_key)` (hex). This proves your
+server holds the same key, completing the trust loop in both directions.
+
+Note the formula: the challenge string **on its own**. No timestamp, no dot, no
+body — that shape is only for request signatures.
+
+## The three mistakes everyone makes
+
+<AccordionGroup>
+  <Accordion title="Signing over re-serialized JSON" icon="binary">
+    The HMAC covers the exact bytes on the wire. `JSON.parse()` followed by
+    `JSON.stringify()` can reorder keys and drop whitespace, so the signature
+    matches for some payloads and not others — which reads as an intermittent,
+    unreproducible bug.
+
+    Capture the raw body and hash **that**.
+  </Accordion>
+
+  <Accordion title="Comparing the timestamp in seconds" icon="clock">
+    `time()` in PHP and `time.time()` in Python are seconds. Castro sends
+    milliseconds. Multiply before you compare — see above.
+  </Accordion>
+
+  <Accordion title="Answering the handshake with the caller's key" icon="key">
+    ```js
+    // WRONG — returns a valid response to anyone who asks. Proves nothing.
+    crypto.createHmac("sha256", req.headers["x-api-key"]).update(challenge)
+
+    // RIGHT — proves YOU hold the same secret.
+    crypto.createHmac("sha256", API_KEY).update(challenge)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+The [conformance script](/testing) checks all three, plus that a bad signature is
+actually rejected. Run it before you connect.
+
+## Key rotation
+
+Regenerating the key in Castro immediately invalidates the old one and marks
+the site disconnected. Update the key on your server, then click **Connect
+website** again.

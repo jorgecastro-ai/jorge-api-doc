@@ -1,0 +1,51 @@
+---
+title: Capabilities
+description: Declare what you support — Castro adapts its UI to match
+icon: "toggle-on"
+---
+
+Your `/handshake` response includes a `capabilities` array. It tells Castro
+which optional endpoints you implemented; Castro **only ever calls what you
+declared**, and hides UI actions your integration can't perform.
+
+```json
+{
+  "name": "Acme Store Backend",
+  "version": "1.0",
+  "capabilities": ["posts.create", "posts.update", "posts.delete", "blog_categories", "seo"],
+  "challenge_response": "…"
+}
+```
+
+## Capability reference
+
+| Capability | Endpoints you implement | What it unlocks in Castro |
+| --- | --- | --- |
+| `posts.create` | `POST /posts` | **Required.** Publishing blog posts |
+| `posts.update` | `PUT /posts/{id}` | **Required.** Update / Update Content / status changes |
+| `posts.delete` | `DELETE /posts/{id}` | The Delete action on published posts |
+| `blog_categories` | `GET/POST /blog-categories`, `PUT/DELETE /blog-categories/{id}` | The category picker & category management in the editor |
+| `authors` | `GET/POST /authors`, `GET/PUT/DELETE /authors/{id}` | The author picker & author management |
+| `products` | `GET/POST /products`, `PUT/DELETE /products/{id}` | Publishing & updating product pages |
+| `product_categories` | `GET/POST /product-categories`, `PUT/DELETE /product-categories/{id}` | Publishing & updating product category pages |
+| `seo` | `PUT /seo` | SEO-only ("Update Metadata") pushes |
+| `pages.list` | `GET /pages` | Page sync (stamping entity identity onto Castro's crawl) & slug→id resolution for bulk updates |
+
+<Note>
+A connection is rejected unless `capabilities` includes **both**
+`posts.create` and `posts.update`.
+</Note>
+
+## Changing capabilities later
+
+Added an endpoint? Update your handshake response, then click **Re-verify
+connection** in Castro (Settings → Integration → Custom Website → Manage).
+Castro re-runs the handshake and refreshes the stored list — no key rotation
+needed.
+
+## What happens without a capability
+
+- Calls to undeclared operations are never sent; Castro returns a clear
+  "not supported by this integration" message to the user instead.
+- UI actions that depend on a missing capability are hidden or disabled
+  (e.g. no Delete button without `posts.delete`).

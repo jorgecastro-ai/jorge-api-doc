@@ -1,0 +1,114 @@
+---
+title: Launch checklist
+description: Everything to confirm before you point Castro at production
+icon: "list-check"
+---
+
+The [conformance script](/testing) proves most of this automatically. This page
+covers the rest — the things a script can't see from the outside.
+
+## Security
+
+<Steps>
+  <Step title="The connection key lives server-side only">
+    Never in client JavaScript, never in a public repo, never in a mobile bundle.
+    Anyone holding it can publish to your site.
+  </Step>
+  <Step title="Signatures are verified over the raw request bytes">
+    Not over re-serialized JSON. See [authentication](/authentication).
+  </Step>
+  <Step title="Signature comparison is constant-time">
+    `crypto.timingSafeEqual` in Node, `hash_equals` in PHP,
+    `hmac.compare_digest` in Python. A plain `===` leaks the signature one byte
+    at a time.
+  </Step>
+  <Step title="Stale requests are rejected">
+    Reject any `X-Castro-Timestamp` more than a few minutes old. Remember it's
+    **milliseconds**.
+  </Step>
+  <Step title="Your endpoints are HTTPS">
+    Castro will call an `http://` base URL, but the key travels in a header —
+    don't send it in the clear.
+  </Step>
+</Steps>
+
+## Correctness
+
+<Steps>
+  <Step title="PUT is partial, everywhere">
+    Posts, products, categories, authors, and the nested `seo` object. Only the
+    fields present in the body change.
+  </Step>
+  <Step title="source_id is stored and indexed">
+    So a re-publish updates instead of duplicating.
+  </Step>
+  <Step title="The id you return is stable">
+    Castro stores it forever and uses it in the path of every later call. Don't
+    regenerate it.
+  </Step>
+  <Step title="Categories, tags and authors are created if they don't exist">
+    Castro sends **names**, not ids. It has no idea what your ids look like.
+  </Step>
+  <Step title="The title isn't rendered twice">
+    `content` arrives with the H1 already stripped. Render `title` as the heading
+    yourself.
+  </Step>
+  <Step title="A failure returns a non-2xx and a human-readable `error`">
+    That message is shown to the Castro user as-is. See [responses & errors](/errors).
+  </Step>
+</Steps>
+
+## Capabilities
+
+<Steps>
+  <Step title="You declared exactly what you built">
+    No more (Castro will call it and get a 404), no less (Castro hides the
+    feature). See [capabilities](/capabilities).
+  </Step>
+  <Step title="You re-verified the connection after adding an endpoint">
+    Settings → Integration → Custom Website → **Re-verify connection**. Castro
+    won't notice a new capability until you do.
+  </Step>
+</Steps>
+
+## Page sync
+
+Only if you declared `pages.list`:
+
+<Steps>
+  <Step title="GET /pages returns absolute, canonical URLs">
+    The same URLs your site actually serves — and the same ones in your sitemap.
+  </Step>
+  <Step title="Drafts are excluded">
+    Castro treats everything you return as live and publicly reachable.
+  </Step>
+  <Step title="Pagination terminates">
+    The last page must be shorter than `per_page`, or Castro will keep asking.
+  </Step>
+  <Step title="You publish a sitemap.xml">
+    So Castro's crawler finds your pages in the first place. See
+    [page sync](/guides/page-sync).
+  </Step>
+</Steps>
+
+## Operations
+
+<Steps>
+  <Step title="You tested against staging, not production">
+    The conformance script publishes and deletes real content.
+  </Step>
+  <Step title="You know where the logs are">
+    Castro records every request and your exact response:
+    **Settings → Integration → Custom Website → Logs**. It's the first place to
+    look when something misbehaves.
+  </Step>
+  <Step title="You have a key rotation plan">
+    Regenerating the key in Castro instantly disconnects the site. Update the key
+    on your server, then reconnect.
+  </Step>
+</Steps>
+
+<Check>
+All ticked, and the [conformance script](/testing) green? Connect it and publish
+something real.
+</Check>

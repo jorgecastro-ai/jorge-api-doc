@@ -30,14 +30,14 @@
 
 /* ── Scrollbars ───────────────────────────────────────────────────────────── */
 /* Chromium on Windows renders the default chunky grey bar, arrow buttons and
-   all — it looks like a 1998 file manager bolted to the sidebar.
+   all. It looks like a 1998 file manager bolted to the sidebar.
 
    The two styling APIs are mutually exclusive: the moment `scrollbar-width` is
-   set, Chromium ignores every ::-webkit-scrollbar rule — including the one that
+   set, Chromium ignores every ::-webkit-scrollbar rule, including the one that
    removes the arrow buttons. So they must NOT be combined.
 
    Chromium/Safari therefore get the ::-webkit-* path (full control, no arrows),
-   and Firefox — which has no ::-webkit-scrollbar — gets the standard properties
+   and Firefox, which has no ::-webkit-scrollbar, gets the standard properties
    below. The @supports test keys off exactly that difference. */
 
 ::-webkit-scrollbar {
@@ -67,7 +67,7 @@
   background: transparent;
 }
 
-/* The up/down arrow buttons — the ugliest part of the default bar. */
+/* The up/down arrow buttons: the ugliest part of the default bar. */
 ::-webkit-scrollbar-button {
   display: none;
   width: 0;
@@ -91,8 +91,8 @@
 
 /* Everything below lives INSIDE @layer utilities on purpose.
  *
- * Mintlify puts `[&_strong]:text-current!` — i.e. `color: currentcolor !important`
- * — on its callouts, from inside the `utilities` layer. Cascade layers reverse
+ * Mintlify puts `[&_strong]:text-current!`, i.e. `color: currentcolor !important`,
+ * on its callouts, from inside the `utilities` layer. Cascade layers reverse
  * the usual precedence for !important: an !important declaration in ANY layer
  * beats an !important declaration outside every layer. So an unlayered override
  * silently loses, even with !important on it.
@@ -120,7 +120,7 @@
 
   /* ── Icon ──────────────────────────────────────────────────────────────── */
   /* The colour sits on the <svg> itself (text-blue-800 dark:text-blue-300), not
-     on the wrapper — so styling the wrapper alone does nothing. */
+     on the wrapper, so styling the wrapper alone does nothing. */
 
   .callout[data-callout-type="note"] [data-component-part="callout-icon"] svg,
   .callout[data-callout-type="info"] [data-component-part="callout-icon"] svg {
@@ -139,7 +139,7 @@
   }
 
   /* ── Body copy ─────────────────────────────────────────────────────────── */
-  /* The text lives in a `.prose` wrapper, not in a <p> — Mintlify renders the
+  /* The text lives in a `.prose` wrapper, not in a <p>: Mintlify renders the
      callout body as a bare span. Colour the wrapper and let it inherit down;
      <strong> keeps its own rule below, since a direct rule always beats an
      inherited value. */
@@ -155,7 +155,7 @@
   }
 
   /* ── Bold lead-in ──────────────────────────────────────────────────────── */
-  /* "You never poll Castro." — the eye should land on the point being made. */
+  /* "You never poll Castro." The eye should land on the point being made. */
 
   .callout[data-callout-type="note"] strong,
   .callout[data-callout-type="info"] strong {

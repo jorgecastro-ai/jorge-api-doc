@@ -5,7 +5,7 @@ icon: "list-check"
 ---
 
 The [conformance script](/testing) proves most of this automatically. This page
-covers the rest — the things a script can't see from the outside.
+covers the rest: the things a script can't see from the outside.
 
 ## Security
 
@@ -27,7 +27,7 @@ covers the rest — the things a script can't see from the outside.
     **milliseconds**.
   </Step>
   <Step title="Your endpoints are HTTPS">
-    Castro will call an `http://` base URL, but the key travels in a header —
+    Castro will call an `http://` base URL, but the key travels in a header,
     don't send it in the clear.
   </Step>
 </Steps>
@@ -77,7 +77,7 @@ Only if you declared `pages.list`:
 
 <Steps>
   <Step title="GET /pages returns absolute, canonical URLs">
-    The same URLs your site actually serves — and the same ones in your sitemap.
+    The same URLs your site actually serves, and the same ones in your sitemap.
   </Step>
   <Step title="Drafts are excluded">
     Castro treats everything you return as live and publicly reachable.

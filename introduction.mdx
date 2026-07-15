@@ -6,13 +6,13 @@ icon: "book-open"
 
 **Jorge Castro** publishes blogs, products, categories and SEO metadata straight
 to your website. If you run WordPress or Shopify, our plugins handle everything.
-If you run **anything else** — Laravel, Django, Rails, Next.js, a home-grown CMS
-— the **Custom Integration** is for you.
+If you run **anything else**, Laravel, Django, Rails, Next.js, a home-grown CMS,
+the **Custom Integration** is for you.
 
 <Note>
 Throughout these docs we shorten the product name to **Castro** after the first
 mention. The wire protocol keeps that name too: the headers are `X-Castro-*` and
-the conventional base path is `/api/castro`. Those are identifiers — don't
+the conventional base path is `/api/castro`. Those are identifiers: don't
 rename them.
 </Note>
 
@@ -33,7 +33,7 @@ Castro "Publish" click
 
 <Note>
 **You never poll Castro.** Content is pushed to you the moment it's published,
-exactly like a webhook — but with a documented resource contract, so updates,
+exactly like a webhook, but with a documented resource contract, so updates,
 deletes and page sync work too.
 </Note>
 
@@ -43,7 +43,7 @@ itself: `POST {base}/posts`, `PUT {base}/posts/42`, and so on.
 ## What you implement
 
 Only **three endpoints are required**. Everything else is optional, and unlocked
-per feature via [capabilities](/capabilities) — declare what you built, and Castro
+per feature via [capabilities](/capabilities): declare what you built, and Castro
 adapts its UI to match.
 
 | Endpoint | Required | What it powers |
@@ -52,7 +52,7 @@ adapts its UI to match.
 | `POST /posts` | ✅ | Publishing blog posts |
 | `PUT /posts/{id}` | ✅ | Updating blog posts |
 | `DELETE /posts/{id}` | Optional | The Delete action on published posts |
-| `GET /pages` | Optional | [Page sync](/guides/page-sync) — letting Castro recognise which entity each crawled page is |
+| `GET /pages` | Optional | [Page sync](/guides/page-sync): letting Castro recognise which entity each crawled page is |
 | `PUT /seo` | Optional | SEO-only ("Update Metadata") pushes |
 | `/blog-categories`, `/authors` | Optional | Category & author pickers in the editor |
 | `/products`, `/product-categories` | Optional | Product & product-category publishing |
@@ -65,11 +65,11 @@ Everything else is mechanical. These two are where integrations actually break:
   <Card title="Sign over the raw body" icon="binary" href="/authentication">
     The HMAC covers the **exact bytes** Castro sent. Parse the JSON and
     re-serialize it to verify, and the signature will match for some payloads and
-    not others — which looks maddeningly intermittent.
+    not others, which looks maddeningly intermittent.
   </Card>
   <Card title="PUT is partial" icon="pen-to-square" href="/errors#the-partial-update-rule">
     Apply **only the fields present in the body**. Castro's *Update Content*
-    action sends nothing but the content — treat that as a full replace and you
+    action sends nothing but the content. Treat that as a full replace and you
     erase the user's title, categories and SEO.
   </Card>
 </CardGroup>
@@ -81,7 +81,7 @@ Everything else is mechanical. These two are where integrations actually break:
     Key → three endpoints → connected. About 30 minutes.
   </Card>
   <Card title="Test your implementation" icon="flask" href="/testing">
-    A zero-dependency script that proves your endpoints are correct — before real
+    A zero-dependency script that proves your endpoints are correct, before real
     content depends on them.
   </Card>
   <Card title="Authentication" icon="lock" href="/authentication">

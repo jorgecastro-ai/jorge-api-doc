@@ -5,7 +5,7 @@ icon: "flask"
 ---
 
 You can connect a broken integration. Castro will happily complete the handshake,
-publish a post, and report success — while your `PUT /posts/{id}` quietly wipes
+publish a post, and report success, while your `PUT /posts/{id}` quietly wipes
 the title off every post it touches.
 
 This page gives you a **conformance script** that finds those bugs in about ten
@@ -27,7 +27,7 @@ built-in `fetch`) and nothing else. Nothing is installed, nothing phones home.
     node castro-conformance.mjs https://your-site.com/api/castro <your-connection-key>
     ```
 
-    Run it against a **staging** environment first — it creates and deletes real
+    Run it against a **staging** environment first: it creates and deletes real
     content.
   </Step>
   <Step title="Fix what fails">
@@ -36,7 +36,7 @@ built-in `fetch`) and nothing else. Nothing is installed, nothing phones home.
   </Step>
 </Steps>
 
-## What it checks — and why each one matters
+## What it checks, and why each one matters
 
 The script only tests things that actually break in production. It reads your
 declared capabilities from the handshake and skips whatever you didn't implement.
@@ -64,7 +64,7 @@ declared capabilities from the handshake and skips whatever you didn't implement
   </Accordion>
 
   <Accordion title="A bad signature is actually rejected" icon="shield-halved">
-    It's easy to write signature verification that never says no — a `try/catch`
+    It's easy to write signature verification that never says no: a `try/catch`
     that swallows the mismatch, or a comparison against an undefined variable.
 
     The script sends a deliberately wrong signature and requires a `401`. If your
@@ -74,7 +74,7 @@ declared capabilities from the handshake and skips whatever you didn't implement
   <Accordion title="You verify over the raw body, not re-serialized JSON" icon="binary">
     The signature covers the **exact bytes** Castro sent. If you parse the JSON
     and re-stringify it to verify, key order and whitespace shift, and the
-    signature will never match — but only for some payloads, which makes it look
+    signature will never match, but only for some payloads, which makes it look
     intermittent.
 
     The script sends a body whose key order changes under a naive re-serialize,
@@ -82,7 +82,7 @@ declared capabilities from the handshake and skips whatever you didn't implement
   </Accordion>
 
   <Accordion title="Timestamps are milliseconds, not seconds" icon="clock">
-    Castro signs with `Date.now()` — unix **milliseconds**. Reject anything more
+    Castro signs with `Date.now()`: unix **milliseconds**. Reject anything more
     than a few minutes old.
 
     The script sends a seconds-based timestamp and requires a `401`. If you
@@ -91,7 +91,7 @@ declared capabilities from the handshake and skips whatever you didn't implement
 
   <Accordion title="Drafts stay out of GET /pages" icon="eye-slash">
     `GET /pages` is defined as listing **published** pages. Castro treats
-    everything you return as live and publicly reachable — a draft in that list
+    everything you return as live and publicly reachable: a draft in that list
     gets queued for crawling and shows up as a real page.
   </Accordion>
 </AccordionGroup>
@@ -99,7 +99,7 @@ declared capabilities from the handshake and skips whatever you didn't implement
 ## The script
 
 ```js castro-conformance.mjs
-// Castro Custom Integration — conformance check.
+// Castro Custom Integration: conformance check.
 //   node castro-conformance.mjs <baseUrl> <apiKey>
 // Node 18+. No dependencies.
 
@@ -174,7 +174,7 @@ const expected = crypto.createHmac("sha256", KEY).update(challenge).digest("hex"
 check(
   "challenge_response is HMAC(challenge, your key)",
   hs.data?.challenge_response === expected,
-  "Sign the challenge with YOUR stored key — never with the key from the request header.",
+  "Sign the challenge with YOUR stored key, never with the key from the request header.",
 );
 
 const caps = Array.isArray(hs.data?.capabilities) ? hs.data.capabilities : [];
@@ -204,7 +204,7 @@ const id = created.data?.id;
 check("create returns { id, url }", Boolean(id && created.data?.url), JSON.stringify(created.data));
 
 if (!id) {
-  console.log("\nNo id returned — cannot continue.\n");
+  console.log("\nNo id returned, cannot continue.\n");
   process.exit(1);
 }
 
@@ -222,7 +222,7 @@ if (can("pages.list")) {
   check(
     "PARTIAL UPDATE preserved the title",
     mine?.title === "Castro conformance check",
-    `title is now: ${JSON.stringify(mine?.title)} — a body-only PUT must not overwrite other fields.`,
+    `title is now: ${JSON.stringify(mine?.title)}, a body-only PUT must not overwrite other fields.`,
   );
 } else {
   skipped.push("partial-update verification (needs pages.list to read the post back)");
@@ -238,7 +238,7 @@ if (can("blog_categories")) {
 } else skipped.push("blog_categories");
 
 if (can("authors")) {
-  // Authors are named with display_name / username — NOT `name`. This is the
+  // Authors are named with display_name / username: NOT `name`. This is the
   // exact body Castro's author picker sends.
   const r = await call("POST", "/authors", {
     display_name: "Castro Conformance",
@@ -289,14 +289,14 @@ console.log("\nAuthentication (these must be REJECTED)");
 const badSig = await call("GET", can("pages.list") ? "/pages" : "/handshake", null, {
   sig: "0".repeat(64),
 });
-check("wrong signature → 401", badSig.status === 401, `got ${badSig.status} — your endpoints are unprotected.`);
+check("wrong signature → 401", badSig.status === 401, `got ${badSig.status}: your endpoints are unprotected.`);
 
 const wrongKey = "not-the-real-key";
 const decoy = crypto.randomBytes(8).toString("hex");
 const badKey = await call("POST", "/handshake", { challenge: decoy }, { key: wrongKey });
 check("wrong API key → 401", badKey.status === 401, `got ${badKey.status}`);
 
-// If the server answered anyway, check WHY — a handshake that signs with the
+// If the server answered anyway, check WHY: a handshake that signs with the
 // caller's key hands a valid response to anyone, which is the worst version of
 // this bug and invisible while you're testing with the correct key.
 const echoed = crypto.createHmac("sha256", wrongKey).update(decoy).digest("hex");
@@ -314,7 +314,7 @@ const oldTs = await call("POST", "/handshake", { challenge: "x" }, {
 check(
   "seconds-instead-of-milliseconds timestamp → 401",
   oldTs.status === 401,
-  `got ${oldTs.status} — reject timestamps more than a few minutes old. Castro signs with Date.now() (ms).`,
+  `got ${oldTs.status}: reject timestamps more than a few minutes old. Castro signs with Date.now() (ms).`,
 );
 
 // A pretty-printed body. The signature covers these exact bytes, whitespace and
@@ -330,7 +330,7 @@ const rawCheck = await call("PUT", `/posts/${id}`, null, {
 check(
   "signature verified over the RAW body",
   rawCheck.status === 200,
-  `got ${rawCheck.status} — you are hashing a re-serialized copy of the body, not the bytes received. Capture the raw body before parsing.`,
+  `got ${rawCheck.status}: you are hashing a re-serialized copy of the body, not the bytes received. Capture the raw body before parsing.`,
 );
 
 // ── Cleanup ─────────────────────────────────────────────────────────────────
@@ -394,10 +394,10 @@ A failure names the fix, not just the symptom:
 
 ```text
   FAIL  PARTIAL UPDATE preserved the title
-        title is now: "" — a body-only PUT must not overwrite other fields.
+        title is now: "", a body-only PUT must not overwrite other fields.
 
   FAIL  signature verified over the RAW body
-        got 401 — you are hashing a re-serialized copy of the body, not the
+        got 401: you are hashing a re-serialized copy of the body, not the
         bytes received. Capture the raw body before parsing.
 ```
 
@@ -409,8 +409,8 @@ assert.
 
 ## Testing without touching your backend
 
-Not ready to point this at real code? Run the **reference receiver** — a
-complete, correct implementation of the entire contract — and run the script
+Not ready to point this at real code? Run the **reference receiver**, a
+complete, correct implementation of the entire contract, and run the script
 against that first, so you know what a passing run looks like:
 
 <CodeGroup>
@@ -426,5 +426,5 @@ node castro-conformance.mjs http://localhost:3000/api/castro test-key
 
 <Warning>
 The script publishes and deletes real content. Point it at staging, or at a
-throwaway environment — never at a production site with live traffic.
+throwaway environment, never at a production site with live traffic.
 </Warning>

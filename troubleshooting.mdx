@@ -9,8 +9,8 @@ not your theory.
 
 <Note>
 Castro shows you the real HTTP status and your own error message for every
-request, in **Settings → Integration → Custom Website → Logs**. Start there —
-the answer is usually in your own response body.
+request, in **Settings → Integration → Custom Website → Logs**. Start there.
+The answer is usually in your own response body.
 </Note>
 
 ## Connecting
@@ -26,7 +26,7 @@ the answer is usually in your own response body.
 
     **The path is wrong.** You give Castro a *base URL*, not a full endpoint. If
     your handshake lives at `https://site.com/api/castro/handshake`, the base URL
-    is `https://site.com/api/castro` — Castro appends `/handshake` itself.
+    is `https://site.com/api/castro`. Castro appends `/handshake` itself.
 
     **Your server rejected Castro's own signature.** The handshake request is
     signed like every other request. If your signature check is broken, the
@@ -37,22 +37,22 @@ the answer is usually in your own response body.
     ```
   </Accordion>
 
-  <Accordion title="“Handshake verification failed” — my endpoint returned 200" icon="key">
+  <Accordion title="“Handshake verification failed”: my endpoint returned 200" icon="key">
     Your server answered, but the `challenge_response` was wrong.
 
     **The classic mistake:** signing the challenge with the key that arrived in
     the request header instead of your own stored key.
 
     ```js
-    // WRONG — hands a valid response to anyone who asks. Proves nothing.
+    // WRONG: hands a valid response to anyone who asks. Proves nothing.
     const key = req.headers["x-api-key"];
     challenge_response: crypto.createHmac("sha256", key).update(challenge).digest("hex")
 
-    // RIGHT — proves YOU hold the same secret Castro holds.
+    // RIGHT: proves YOU hold the same secret Castro holds.
     challenge_response: crypto.createHmac("sha256", API_KEY).update(challenge).digest("hex")
     ```
 
-    Note it's `HMAC(challenge)` — the challenge string on its own. No timestamp,
+    Note it's `HMAC(challenge)`: the challenge string on its own. No timestamp,
     no dot, no body. That formula is only for request signatures.
   </Accordion>
 
@@ -67,7 +67,7 @@ the answer is usually in your own response body.
 ## Authentication
 
 <AccordionGroup>
-  <Accordion title="Every request comes back 401 — but my key is definitely right" icon="binary">
+  <Accordion title="Every request comes back 401, but my key is definitely right" icon="binary">
     You're almost certainly verifying the signature over **re-serialized JSON**
     instead of the raw bytes.
 
@@ -102,7 +102,7 @@ the answer is usually in your own response body.
   </Accordion>
 
   <Accordion title="401 with a timestamp complaint" icon="clock">
-    `X-Castro-Timestamp` is unix **milliseconds** — Castro signs with
+    `X-Castro-Timestamp` is unix **milliseconds**. Castro signs with
     `Date.now()`. If you compare it against a seconds-based clock, every request
     looks about 55,000 years in the future.
 
@@ -115,12 +115,12 @@ the answer is usually in your own response body.
     if (skew > 5 * 60 * 1000) return res.status(401).json({ error: "Stale request" });
     ```
 
-    In PHP, `time()` is seconds — use `round(microtime(true) * 1000)`. In Python,
-    `time.time()` is float seconds — use `time.time() * 1000`.
+    In PHP, `time()` is seconds: use `round(microtime(true) * 1000)`. In Python,
+    `time.time()` is float seconds: use `time.time() * 1000`.
   </Accordion>
 
   <Accordion title="GET and DELETE requests fail, POST and PUT work" icon="circle-half-stroke">
-    Requests without a body sign over `"{timestamp}."` — the timestamp, a dot,
+    Requests without a body sign over `"{timestamp}."`: the timestamp, a dot,
     and an **empty string**. If your code skips the dot when the body is empty,
     or signs over the literal string `"null"` or `"undefined"`, the HMAC won't
     match.
@@ -148,14 +148,14 @@ the answer is usually in your own response body.
 
     The update is **partial**. Apply only the fields present in the body; leave
     everything else exactly as it was. Castro's *Update Content* action sends
-    only `{ content, source_id }` — if you overwrite the whole record with that,
+    only `{ content, source_id }`. If you overwrite the whole record with that,
     the title and every other field become empty.
 
     ```js
-    // WRONG — replaces the row with whatever arrived.
+    // WRONG: replaces the row with whatever arrived.
     await db.posts.replace(id, req.body);
 
-    // RIGHT — merge only the keys that are present.
+    // RIGHT: merge only the keys that are present.
     const patch = {};
     for (const [k, v] of Object.entries(req.body)) {
       if (v !== undefined) patch[k] = v;
@@ -184,7 +184,7 @@ the answer is usually in your own response body.
   </Accordion>
 
   <Accordion title="Categories arrive as names, and I expected ids" icon="tags">
-    They are names — strings — on purpose. Castro has no idea what your category
+    They are names, strings, on purpose. Castro has no idea what your category
     ids look like. Create any category that doesn't exist yet, then attach it.
 
     The same is true of `tags` and `author`.
@@ -202,7 +202,7 @@ the answer is usually in your own response body.
 
     Add it to your `/handshake` response, then click **Re-verify connection** in
     Castro (Settings → Integration → Custom Website → Manage). No key rotation
-    needed — see [capabilities](/capabilities).
+    needed. See [capabilities](/capabilities).
   </Accordion>
 </AccordionGroup>
 
@@ -220,14 +220,14 @@ the answer is usually in your own response body.
     They have to be the **same URLs**.
 
     - Return **absolute** URLs (`https://site.com/blog/hello`), not paths.
-    - Use the canonical form — pick one of `https://` vs `http://`, `www` vs
+    - Use the canonical form: pick one of `https://` vs `http://`, `www` vs
       bare, trailing slash vs none, and be consistent with what your site
       actually serves.
     - Make sure Castro has **crawled** your site at all. Sync stamps identity
       onto crawled pages; with no crawl, there's nothing to stamp. Run a crawl
       first.
 
-    Pages Castro has never crawled aren't lost — they're queued for crawling, and
+    Pages Castro has never crawled aren't lost: they're queued for crawling, and
     the next sync matches them.
   </Accordion>
 

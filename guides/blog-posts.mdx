@@ -4,7 +4,7 @@ description: The publish, update and delete lifecycle
 icon: "newspaper"
 ---
 
-## Create — `POST /posts`
+## Create: `POST /posts`
 
 Sent when the user publishes a blog post. Example payload:
 
@@ -31,18 +31,18 @@ Sent when the user publishes a blog post. Example payload:
 
 Implementation notes:
 
-- **`content` is HTML with the H1 already removed** — render `title` as the
+- **`content` is HTML with the H1 already removed**: render `title` as the
   page heading yourself.
 - **`categories` are names**, not ids. Create any that don't exist.
 - **`status`** is `publish` or `draft`, driven by the user's publishing mode.
 - **`featured_image`** is a URL hosted by Castro; download it or hotlink it.
 - Respond `201` with `{ "id": "<your id>", "url": "<public url>" }`. The id is
-  any string up to 191 chars — Castro stores it verbatim and uses it for every
+  any string up to 191 chars. Castro stores it verbatim and uses it for every
   later call about this post.
-- Store **`source_id`** — a re-publish of the same Castro content carries the
+- Store **`source_id`**: a re-publish of the same Castro content carries the
   same `source_id`, so you can deduplicate instead of creating twins.
 
-## Update — `PUT /posts/{id}`
+## Update: `PUT /posts/{id}`
 
 **Partial update**: apply only the fields present, leave the rest untouched.
 This one rule powers three different Castro actions:
@@ -56,13 +56,13 @@ This one rule powers three different Castro actions:
 Respond `200` with `{ "id": "..." }`, or `404` + `{ "error": "Post not found" }`
 if the id is unknown.
 
-## Delete — `DELETE /posts/{id}`
+## Delete: `DELETE /posts/{id}`
 
-Optional (capability `posts.delete`). Delete or unpublish the post — your
+Optional (capability `posts.delete`). Delete or unpublish the post, your
 choice, as long as it disappears from the live site. Respond
 `{ "deleted": true, "id": "..." }`.
 
 ## Errors
 
 Any non-2xx response with `{ "error": "message" }` is surfaced to the Castro
-user verbatim — make the message actionable.
+user verbatim. Make the message actionable.

@@ -6,7 +6,7 @@ icon: "user-pen"
 
 Declare the `authors` capability to power Castro's author picker and author
 management. Blog posts always carry the author's **display name** in the
-`author` field of the post payload — this surface only manages the list users
+`author` field of the post payload: this surface only manages the list users
 pick from.
 
 Implement:
@@ -35,4 +35,4 @@ Author object shape:
 ```
 
 If your platform has no user system, a simple `authors` table (or even a JSON
-file) with names is enough — Castro only needs the names back.
+file) with names is enough: Castro only needs the names back.

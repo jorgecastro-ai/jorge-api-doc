@@ -21,7 +21,7 @@ like a success.
 <Note>
 **The `id` you return on create is permanent.** Castro stores it verbatim and
 uses it in the path of every later call about that entity. Any string up to 191
-characters works — a database id, a UUID, a slug. Just never change it.
+characters works: a database id, a UUID, a slug. Just never change it.
 </Note>
 
 ### List endpoints return a bare array
@@ -31,7 +31,7 @@ characters works — a database id, a UUID, a slug. Just never change it.
 ```
 
 An `{ "items": [...] }` wrapper is also accepted, but the bare array is the
-documented shape — prefer it.
+documented shape: prefer it.
 
 ## Error responses
 
@@ -54,13 +54,13 @@ a log file. `"Post not found"` is useful. `"Error"` is not.
 | `404` | The entity id is unknown to you | Your `error` message |
 | `5xx` | Your server broke | Your `error` message, surfaced as a failure |
 
-Every request and response — including your error body — is recorded in the
+Every request and response, including your error body, is recorded in the
 integration logs, so a user can always see the raw exchange.
 
 <Warning>
 **Never return `200` for a failure.** If a post could not be saved, say so with a
 `4xx` or `5xx`. A `200` tells Castro the content is live on your site, and it will
-be treated that way — including in later updates that will then hit an id that
+be treated that way, including in later updates that will then hit an id that
 doesn't exist.
 </Warning>
 
@@ -90,7 +90,7 @@ contains just `{ "content": "..." }` must not blank out the title, categories,
 author or SEO.
 </Warning>
 
-Nested objects follow the same rule — merge `seo`, don't replace it.
+Nested objects follow the same rule: merge `seo`, don't replace it.
 
 The [conformance script](/testing) asserts this, and the
 [troubleshooting guide](/troubleshooting#publishing) shows the two-line fix.

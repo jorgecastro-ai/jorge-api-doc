@@ -9,7 +9,7 @@ icon: "rocket"
     In Castro, open **Settings → Integration → Custom Website** and click
     **Get Connection Key**.
 
-    This key authenticates every request Castro sends you. Keep it server-side —
+    This key authenticates every request Castro sends you. Keep it server-side,
     anyone holding it can publish to your site.
   </Step>
 
@@ -31,7 +31,7 @@ icon: "rocket"
       if (req.headers["x-api-key"] !== API_KEY)
         return res.status(401).json({ error: "Invalid API key" });
 
-      // Castro signs with Date.now() — milliseconds.
+      // Castro signs with Date.now(): milliseconds.
       if (Math.abs(Date.now() - Number(ts)) > 5 * 60 * 1000)
         return res.status(401).json({ error: "Stale request" });
 
@@ -59,7 +59,7 @@ icon: "rocket"
         exit(json_encode(['error' => 'Invalid API key']));
     }
 
-    // microtime(true) * 1000 — Castro signs in milliseconds, not seconds.
+    // microtime(true) * 1000: Castro signs in milliseconds, not seconds.
     if (abs(round(microtime(true) * 1000) - (int) $ts) > 300000) {
         http_response_code(401);
         exit(json_encode(['error' => 'Stale request']));
@@ -76,13 +76,13 @@ icon: "rocket"
     ```python Python / Flask
     import hashlib, hmac, time
 
-    raw = request.get_data()            # bytes — not request.json
+    raw = request.get_data()            # bytes: not request.json
     ts  = request.headers.get("X-Castro-Timestamp", "")
 
     if not hmac.compare_digest(request.headers.get("X-API-Key", ""), API_KEY):
         return {"error": "Invalid API key"}, 401
 
-    # time.time() is seconds — Castro signs in milliseconds.
+    # time.time() is seconds: Castro signs in milliseconds.
     if abs(time.time() * 1000 - float(ts or 0)) > 300_000:
         return {"error": "Stale request"}, 401
 
@@ -101,7 +101,7 @@ icon: "rocket"
   <Step title="Implement the three required endpoints">
     Mount them under one base path, e.g. `/api/castro`.
 
-    **`POST /handshake`** — prove you hold the key, and declare what you support.
+    **`POST /handshake`**: prove you hold the key, and declare what you support.
     Sign the challenge with **your own stored key**, never with the key that
     arrived in the request:
 
@@ -119,14 +119,14 @@ icon: "rocket"
     });
     ```
 
-    **`POST /posts`** — store the post, return your id. Castro uses that id in
+    **`POST /posts`**: store the post, return your id. Castro uses that id in
     every later call about this post, so make it stable:
 
     ```js
     app.post("/api/castro/posts", async (req, res) => {
       const { title, content, excerpt, status, categories, seo, source_id } = req.body;
 
-      // Re-publishes carry the same source_id — update instead of duplicating.
+      // Re-publishes carry the same source_id: update instead of duplicating.
       const existing = await db.posts.findBySourceId(source_id);
       const post = existing
         ? await db.posts.update(existing.id, { title, html: content, excerpt, status })
@@ -136,7 +136,7 @@ icon: "rocket"
     });
     ```
 
-    **`PUT /posts/{id}`** — a **partial** update. Apply only the fields present;
+    **`PUT /posts/{id}`**: a **partial** update. Apply only the fields present;
     leave everything else alone:
 
     ```js
@@ -168,19 +168,19 @@ icon: "rocket"
     node castro-conformance.mjs https://your-site.com/api/castro <your-key>
     ```
 
-    Grab it from [Test your implementation](/testing) — one file, no dependencies.
+    Grab it from [Test your implementation](/testing): one file, no dependencies.
   </Step>
 
   <Step title="Connect your website">
-    Back in Castro, enter your **base URL** — `https://your-site.com/api/castro`,
-    not the handshake path — and click **Connect website**.
+    Back in Castro, enter your **base URL**, `https://your-site.com/api/castro`,
+    not the handshake path, and click **Connect website**.
 
     Castro calls your `/handshake`, verifies the challenge, and stores your
     declared capabilities.
 
     <Warning>
     Your base URL must be reachable from the public internet. `localhost` won't
-    work — deploy it, or tunnel it with `ngrok http 3000` while developing.
+    work: deploy it, or tunnel it with `ngrok http 3000` while developing.
     </Warning>
   </Step>
 
@@ -200,7 +200,7 @@ icon: "rocket"
     The handful of things a script can't assert from the outside.
   </Card>
   <Card title="Page sync" icon="arrows-rotate" href="/guides/page-sync">
-    Implement `GET /pages` so Castro can recognise — and update — the pages it
+    Implement `GET /pages` so Castro can recognise, and update, the pages it
     crawled on your site.
   </Card>
 </CardGroup>

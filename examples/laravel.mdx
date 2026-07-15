@@ -4,8 +4,8 @@ description: Middleware, routes and a partial-update controller
 icon: "laravel"
 ---
 
-The signature covers the raw request body, so verification belongs in middleware
-— before anything parses the JSON.
+The signature covers the raw request body, so verification belongs in middleware,
+before anything parses the JSON.
 
 ## 1. The signing middleware
 
@@ -23,7 +23,7 @@ use Illuminate\Http\Request;
 
 class VerifyCastroSignature
 {
-    // Castro signs with Date.now() — unix milliseconds.
+    // Castro signs with Date.now(): unix milliseconds.
     private const MAX_SKEW_MS = 5 * 60 * 1000;
 
     public function handle(Request $request, Closure $next)
@@ -41,7 +41,7 @@ class VerifyCastroSignature
             return response()->json(['error' => 'Stale request'], 401);
         }
 
-        // getContent() is the RAW body. Never json_decode() and re-encode here —
+        // getContent() is the RAW body. Never json_decode() and re-encode here:
         // key order would shift and the signature would never match.
         $expected = hash_hmac('sha256', $timestamp.'.'.$request->getContent(), $key);
 
@@ -107,7 +107,7 @@ class CastroController extends Controller
         'pages.list',
     ];
 
-    // Prove we hold the same key. Sign with OUR stored key — never with the key
+    // Prove we hold the same key. Sign with OUR stored key: never with the key
     // that arrived in the request, which would prove nothing.
     public function handshake(Request $request)
     {
@@ -147,7 +147,7 @@ class CastroController extends Controller
     }
 
     // PARTIAL update: apply only the keys the body actually contains. Castro's
-    // "Update Content" action sends nothing but { content, source_id } — a full
+    // "Update Content" action sends nothing but { content, source_id }: a full
     // replace here would erase the title, categories, author and SEO.
     public function updatePost(Request $request, string $id)
     {
@@ -171,7 +171,7 @@ class CastroController extends Controller
             }
         }
 
-        // Merge the SEO object — an SEO push carrying only a description must
+        // Merge the SEO object: an SEO push carrying only a description must
         // not wipe the title.
         if ($request->has('seo')) {
             $post->seo = array_merge($post->seo ?? [], $request->input('seo'));
@@ -202,7 +202,7 @@ class CastroController extends Controller
         return response()->json(['deleted' => true, 'id' => $id]);
     }
 
-    // Published pages only — Castro treats everything here as live.
+    // Published pages only: Castro treats everything here as live.
     public function listPages(Request $request)
     {
         $perPage = min((int) $request->query('per_page', 100), 500);
@@ -227,7 +227,7 @@ class CastroController extends Controller
 <Warning>
 Use `$request->has()`, not `$request->input()` with a default, to decide whether
 a field was sent. `$request->input('title', $post->title)` looks like it handles
-the partial case — but an explicitly-sent empty string still overwrites, and a
+the partial case, but an explicitly-sent empty string still overwrites, and a
 missing key silently rewrites the same value on every update.
 </Warning>
 
@@ -238,5 +238,5 @@ node castro-conformance.mjs https://your-site.com/api/castro <your-key>
 ```
 
 The [conformance script](/testing) will tell you if the middleware rejects a bad
-signature and if your `PUT` really is partial — the two things this file exists
+signature and if your `PUT` really is partial: the two things this file exists
 to get right.

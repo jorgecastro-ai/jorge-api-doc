@@ -5,12 +5,12 @@ icon: "php"
 ---
 
 A single-file receiver you can adapt to Laravel/Symfony routes. Point Castro
-at `https://your-site.com/castro.php` as the base URL — or mount the same
+at `https://your-site.com/castro.php` as the base URL, or mount the same
 logic under a route group.
 
 ```php
 <?php
-// castro.php — Castro Custom Integration receiver
+// castro.php: Castro Custom Integration receiver
 $API_KEY = getenv('CASTRO_API_KEY');
 
 $raw  = file_get_contents('php://input');

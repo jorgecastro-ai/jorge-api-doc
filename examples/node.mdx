@@ -14,7 +14,7 @@ const crypto = require("crypto");
 const API_KEY = process.env.CASTRO_API_KEY; // from Settings → Integration
 const app = express();
 
-// Capture the raw body — signatures are computed over the exact bytes sent.
+// Capture the raw body: signatures are computed over the exact bytes sent.
 app.use(express.json({ verify: (req, res, buf) => (req.rawBody = buf) }));
 
 app.use("/api/castro", (req, res, next) => {
@@ -76,7 +76,7 @@ app.listen(3000);
 <Tip>
 A **zero-dependency reference receiver** implementing the *entire* contract
 (all optional endpoints, in-memory store, request logging) ships in the Castro
-repo at `dev/custom-receiver/server.js` — run it with
+repo at `dev/custom-receiver/server.js`. Run it with
 `API_KEY=<key> node server.js` and connect Castro to `http://localhost:4567`
 to see every payload live.
 </Tip>

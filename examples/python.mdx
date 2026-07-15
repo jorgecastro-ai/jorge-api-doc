@@ -67,7 +67,7 @@ async def delete_post(post_id: str, request: Request):
 ```
 
 <Note>
-FastAPI raises `HTTPException` bodies as `{"detail": "..."}` — Castro expects
+FastAPI raises `HTTPException` bodies as `{"detail": "..."}`. Castro expects
 `{"error": "..."}`. Add a small exception handler that renames the field so
 your error messages surface cleanly to the Castro user.
 </Note>
